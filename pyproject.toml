@@ -1,0 +1,18 @@
+[project]
+name = "linuxdebugger"
+version = "0.4.0"
+description = "Distro-agnostic Linux system debugging TUI, starting with log monitoring"
+requires-python = ">=3.10"
+dependencies = [
+    "textual>=8.0.0",
+]
+
+[project.scripts]
+linuxdebugger = "linuxdebugger.app:run"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["linuxdebugger", "linuxdebugger.widgets"]
