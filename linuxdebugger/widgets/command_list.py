@@ -65,7 +65,14 @@ class CommandItem(ListItem):
 
 
 class CommandList(ListView):
-    """A ListView that lets the user type-to-filter while it has focus."""
+    """A ListView that lets the user type-to-filter while it has focus.
+
+    Filtering toggles the display/disabled state of the already-mounted
+    items instead of destroying and recreating widgets on every keystroke —
+    the latter is expensive enough (widget + CSS + layout churn) that on a
+    real terminal it visibly lags behind fast typing, making the app look
+    like it "freezes" a couple of keystrokes in.
+    """
 
     BINDINGS = [
         Binding("right", "open_flags", "Flags", show=False),
@@ -85,30 +92,49 @@ class CommandList(ListView):
         self,
         commands: list[Command],
         flags_provider: FlagsProvider | None = None,
+        on_filter_changed: Callable[[str], None] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self._all_commands = commands
-        self._visible_commands: list[Command] = []
+        self._visible_commands: list[Command] = list(commands)
         self._flags_provider = flags_provider or (lambda _name: set())
+        self._on_filter_changed = on_filter_changed
         self.filter_text = ""
         self.border_title = "Commands"
 
     async def on_mount(self) -> None:
-        await self._rebuild()
+        await self._mount_items(self._all_commands)
 
-    async def _rebuild(self) -> None:
-        needle = self.filter_text.lower()
-        self._visible_commands = [
-            c for c in self._all_commands if needle in c.name.lower()
-        ]
+    async def set_commands(self, commands: list[Command]) -> None:
+        self._all_commands = commands
+        self.filter_text = ""
+        await self._mount_items(commands)
+
+    async def _mount_items(self, commands: list[Command]) -> None:
         await self.clear()
-        for command in self._visible_commands:
+        for command in commands:
             selected = self._flags_provider(command.name)
             await self.append(CommandItem(command, selected))
-        self.border_subtitle = f"filter: {self.filter_text}" if self.filter_text else ""
-        if self._visible_commands:
-            self.index = 0
+        self._apply_filter()
+
+    def _apply_filter(self) -> None:
+        needle = self.filter_text.lower()
+        items = [item for item in self.children if isinstance(item, CommandItem)]
+        first_visible_index: int | None = None
+        visible_commands: list[Command] = []
+        for index, item in enumerate(items):
+            matches = needle in item.command.name.lower()
+            item.display = matches
+            item.disabled = not matches
+            if matches:
+                visible_commands.append(item.command)
+                if first_visible_index is None:
+                    first_visible_index = index
+        self._visible_commands = visible_commands
+        self.index = first_visible_index
+        if self._on_filter_changed is not None:
+            self._on_filter_changed(self.filter_text)
 
     def refresh_flag_indicator(self, command_name: str) -> None:
         selected = self._flags_provider(command_name)
@@ -116,22 +142,22 @@ class CommandList(ListView):
             if isinstance(item, CommandItem) and item.command.name == command_name:
                 item.set_selected_flags(selected)
 
-    async def on_key(self, event: events.Key) -> None:
+    def on_key(self, event: events.Key) -> None:
         if event.key == "backspace":
             if self.filter_text:
                 self.filter_text = self.filter_text[:-1]
-                await self._rebuild()
+                self._apply_filter()
             event.stop()
         elif event.key == "escape":
             if self.filter_text:
                 self.filter_text = ""
-                await self._rebuild()
+                self._apply_filter()
                 event.stop()
         elif event.key == "enter":
             return
         elif event.is_printable and event.character:
             self.filter_text += event.character
-            await self._rebuild()
+            self._apply_filter()
             event.stop()
 
     def on_list_view_selected(self, event: ListView.Selected) -> None:

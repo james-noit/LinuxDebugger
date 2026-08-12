@@ -2,18 +2,21 @@ import asyncio
 from collections import defaultdict
 
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
 from textual.widgets import Footer, ListView
 
-from .commands import COMMANDS, Command
+from .commands import PANELS, Command
 from .version import load_version
 from .widgets.command_description import CommandDescription
 from .widgets.command_list import CommandItem, CommandList
+from .widgets.filter_bar import FilterBar
 from .widgets.flag_description import FlagDescription
 from .widgets.flag_list import FlagItem, FlagList
 from .widgets.header import Header
 from .widgets.log_view import LogView
+from .widgets.panel_tabs import PanelTabs
 from .widgets.password_modal import PasswordModal
 
 load_version()
@@ -46,26 +49,63 @@ class LinuxDebuggerApp(App):
         ("ctrl+k", "stop_command", "Stop running command"),
         ("ctrl+l", "clear_log", "Clear log"),
         ("ctrl+q", "quit", "Quit"),
+        # alt+c/alt+b are the documented shortcut, but terminals send Alt
+        # combos as a bare Escape followed by the letter as two separate
+        # bytes; if there's any delay between them (very common with real
+        # keypresses, SSH, etc.) Textual can't tell that apart from the user
+        # just pressing Escape, and the letter falls through as normal text
+        # input instead. ctrl+right/ctrl+left are sent as a single atomic
+        # escape sequence by the terminal, so they don't have this problem —
+        # keep them as the reliable fallback.
+        Binding("alt+c", "next_panel", "Next panel", show=False),
+        Binding("alt+b", "prev_panel", "Previous panel", show=False),
+        Binding("ctrl+right", "next_panel", "Next panel"),
+        Binding("ctrl+left", "prev_panel", "Previous panel"),
     ]
 
     def __init__(self) -> None:
         super().__init__()
         self._process: asyncio.subprocess.Process | None = None
         self._worker = None
-        self._flag_selections: dict[str, set[int]] = defaultdict(set)
+        self._flag_selections: dict[tuple[str, str], set[int]] = defaultdict(set)
+        self._panel_index = 0
 
     def compose(self) -> ComposeResult:
         yield Header()
         with Horizontal(id="main-row"):
             with Vertical(id="command-pane"):
+                yield PanelTabs(id="panel-tabs")
+                yield FilterBar(id="filter-bar")
                 yield CommandList(
-                    COMMANDS,
-                    flags_provider=lambda name: self._flag_selections[name],
+                    self._active_panel.commands,
+                    flags_provider=self._flags_for,
+                    on_filter_changed=self._on_filter_changed,
                     id="commands",
                 )
                 yield CommandDescription(id="command-description")
             yield LogView(id="log")
         yield Footer()
+
+    def on_mount(self) -> None:
+        self._update_panel_tabs()
+
+    @property
+    def _active_panel(self):
+        return PANELS[self._panel_index]
+
+    def _flags_for(self, command_name: str) -> set[int]:
+        return self._flag_selections[(self._active_panel.name, command_name)]
+
+    def _on_filter_changed(self, filter_text: str) -> None:
+        try:
+            self.query_one("#filter-bar", FilterBar).show(filter_text)
+        except NoMatches:
+            pass
+
+    def _update_panel_tabs(self) -> None:
+        self.query_one("#panel-tabs", PanelTabs).show(
+            [panel.name for panel in PANELS], self._panel_index
+        )
 
     @property
     def log_view(self) -> LogView:
@@ -85,7 +125,7 @@ class LinuxDebuggerApp(App):
         if isinstance(message.list_view, CommandList):
             item = message.item
             command = item.command if isinstance(item, CommandItem) else None
-            selected = self._flag_selections[command.name] if command else set()
+            selected = self._flags_for(command.name) if command else set()
             self.command_description.show(command, selected)
         elif isinstance(message.list_view, FlagList):
             item = message.item
@@ -95,13 +135,39 @@ class LinuxDebuggerApp(App):
             except NoMatches:
                 pass
 
+    # -- panel switching --------------------------------------------------
+
+    def action_next_panel(self) -> None:
+        self.run_worker(self._switch_panel(1), exclusive=False)
+
+    def action_prev_panel(self) -> None:
+        self.run_worker(self._switch_panel(-1), exclusive=False)
+
+    async def _switch_panel(self, direction: int) -> None:
+        if len(PANELS) < 2:
+            return
+        if self.query("#flags"):
+            await self._close_flag_picker()
+
+        self._panel_index = (self._panel_index + direction) % len(PANELS)
+        self._update_panel_tabs()
+
+        command_list = self.command_list
+        await command_list.set_commands(self._active_panel.commands)
+        command_list.focus()
+
+        item = command_list.highlighted_child
+        command = item.command if isinstance(item, CommandItem) else None
+        selected = self._flags_for(command.name) if command else set()
+        self.command_description.show(command, selected)
+
     # -- flag picker ----------------------------------------------------
 
     async def on_command_list_open_flags(
         self, message: CommandList.OpenFlags
     ) -> None:
         command = message.command
-        selected = self._flag_selections[command.name]
+        selected = self._flags_for(command.name)
 
         self.command_list.display = False
 
@@ -115,11 +181,14 @@ class LinuxDebuggerApp(App):
 
     def on_flag_list_flag_toggled(self, message: FlagList.FlagToggled) -> None:
         self.command_description.show(
-            message.command, self._flag_selections[message.command.name]
+            message.command, self._flags_for(message.command.name)
         )
         self.command_list.refresh_flag_indicator(message.command.name)
 
     async def on_flag_list_closed(self, message: FlagList.Closed) -> None:
+        await self._close_flag_picker()
+
+    async def _close_flag_picker(self) -> None:
         try:
             await self.query_one("#flags", FlagList).remove()
         except NoMatches:
@@ -135,7 +204,7 @@ class LinuxDebuggerApp(App):
 
         item = command_list.highlighted_child
         command = item.command if isinstance(item, CommandItem) else None
-        selected = self._flag_selections[command.name] if command else set()
+        selected = self._flags_for(command.name) if command else set()
         self.command_description.show(command, selected)
 
     # -- running commands -------------------------------------------------
@@ -160,7 +229,7 @@ class LinuxDebuggerApp(App):
         self.sub_title = f"running: {command.name}"
 
         argv = [command.name, *command.base_args]
-        for index in sorted(self._flag_selections[command.name]):
+        for index in sorted(self._flags_for(command.name)):
             argv.extend(command.flags[index].tokens)
         if command.requires_sudo:
             argv = ["sudo", "-k", "-S", "-p", "", *argv]

@@ -47,26 +47,43 @@ linuxdebugger
 
 ## Usage
 
-- **Left pane** — list of log commands (`journalctl`, `dmesg`, `tail`, `last`,
-  `who`, `systemctl`, `uptime`), shown without flags. Use the arrow keys to
-  navigate, or just start typing to filter by name. Commands marked with ⚠
-  require sudo — selecting one prompts for the password (masked input) before
-  running. A box under the list explains whichever command is currently
-  highlighted. Commands that have optional flags show a `flags →` hint on the
-  right edge of the row, and turn green once at least one of their flags is
-  selected, so you can see at a glance what's about to run before pressing
-  Enter.
+- **Left pane** — a panel of commands (see below), a filter indicator, the
+  command list itself, and a description box, stacked top to bottom.
+- **Panels** — commands are grouped into panels: **Logs** (`journalctl`,
+  `dmesg`, `tail`, `last`, `who`, `systemctl`, `uptime`, `free`, `df`, `ps`,
+  `vmstat`, `lsblk`) and **Network** (`ss`, `ip`, `ping`, `tcpdump`, `nmcli`,
+  a NetworkManager-scoped `journalctl`). The tag row above the list shows
+  both panel names, with the active one highlighted, plus the shortcuts to
+  switch: **Ctrl+→** moves to the next panel, **Ctrl+←** moves back
+  (**Alt+C** / **Alt+B** also work, but terminals send Alt combos as a bare
+  Escape followed by the letter as two separate keystrokes, so if there's
+  any delay between them — common over SSH or on a busy system — the letter
+  falls through as filter text instead; Ctrl+←/→ don't have that problem, so
+  they're the reliable choice and what's shown in the UI). Switching panels
+  resets the filter and closes any open flag picker.
+- Commands are shown without flags. Use the arrow keys to navigate the list,
+  or just start typing to filter by name — the typed text always shows in
+  the bar right above the list (`🔎 type to filter…` when empty). Commands
+  marked with ⚠ require sudo — selecting one prompts for the password
+  (masked input) before running. A box under the list explains whichever
+  command is currently highlighted. Commands that have optional flags show a
+  `flags →` hint on the right edge of the row, and turn green once at least
+  one of their flags is selected, so you can see at a glance what's about to
+  run before pressing Enter.
 - Press **→** on a command to open its list of optional flags (if it has
   any). Navigate with the arrows, **Enter**/**Space** toggles a flag on or
   off (checked flags show a ☒ and turn green), and **←**/**Escape** goes back
   to the command list. While the flag list is open, a second box shows the
   description of whichever flag is currently in focus, and the description
   box above updates live to preview the full command with the flags you've
-  selected so far. Selections are remembered per command.
+  selected so far. Selections are remembered per command, independently per
+  panel.
 - **Right pane** — scrollable log output. Select any text with the mouse (or
   keyboard selection) and it is copied to the system clipboard automatically
   (via `wl-copy`/`xclip`/`xsel` if available, falling back to the terminal's
   OSC52 clipboard so it also works over SSH).
+- `Ctrl+→` / `Ctrl+←` (or `Alt+C` / `Alt+B`) — switch to the next / previous
+  command panel.
 - `Ctrl+K` — stop the currently running command (needed for `-f`/`-w` follow
   commands, which stream forever until stopped).
 - `Ctrl+L` — clear the log pane.
