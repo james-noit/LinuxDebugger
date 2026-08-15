@@ -78,6 +78,14 @@ linuxdebugger
   box above updates live to preview the full command with the flags you've
   selected so far. Selections are remembered per command, independently per
   panel.
+- Some flags carry a value you can customize, marked with a `›customize`
+  hint (e.g. `-p err` or `--since today`). Pressing **→** on one of these
+  opens a picker: choose from a short list of common values, or type your
+  own and press Enter — either way the flag is applied with that exact
+  value. Escape cancels without changing anything.
+- Once you press **Enter** to run a command, the header shows the exact
+  command line that was launched, including every flag and any customized
+  values, so there's never a guess about what's actually executing.
 - **Right pane** — a "Filters" bar, a search bar, then the scrollable log
   itself. Select text with the mouse (or keyboard selection) and it's copied
   to the system clipboard automatically (via `wl-copy`/`xclip`/`xsel` if

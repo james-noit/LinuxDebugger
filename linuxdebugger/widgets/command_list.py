@@ -9,15 +9,20 @@ from textual.widgets import Label, ListItem, ListView
 from ..commands import Command
 
 FlagsProvider = Callable[[str], set[int]]
+ValuesProvider = Callable[[str], dict[int, str]]
 
 
-def _flags_hint(command: Command, selected_indices: set[int]) -> str:
+def _flags_hint(
+    command: Command, selected_indices: set[int], values: dict[int, str] | None = None
+) -> str:
     if not command.flags:
         return ""
     if not selected_indices:
         return "flags →"
+    values = values or {}
     applied = " ".join(
-        " ".join(command.flags[i].tokens) for i in sorted(selected_indices)
+        " ".join(command.flags[i].resolved_tokens(values.get(i)))
+        for i in sorted(selected_indices)
     )
     return f"{applied} →"
 
@@ -48,19 +53,26 @@ class CommandItem(ListItem):
     }
     """
 
-    def __init__(self, command: Command, selected_indices: set[int] | None = None) -> None:
+    def __init__(
+        self,
+        command: Command,
+        selected_indices: set[int] | None = None,
+        values: dict[int, str] | None = None,
+    ) -> None:
         self.command = command
         selected_indices = selected_indices or set()
         icon = "⚠ " if command.requires_sudo else "  "
         self._name_label = Label(f"{icon}{command.name}", classes="cmd-name")
         self._hint_label = Label(
-            _flags_hint(command, selected_indices), classes="cmd-flags-hint"
+            _flags_hint(command, selected_indices, values), classes="cmd-flags-hint"
         )
         super().__init__(Horizontal(self._name_label, self._hint_label))
         self.set_class(bool(selected_indices), "-has-flags")
 
-    def set_selected_flags(self, selected_indices: set[int]) -> None:
-        self._hint_label.update(_flags_hint(self.command, selected_indices))
+    def set_selected_flags(
+        self, selected_indices: set[int], values: dict[int, str] | None = None
+    ) -> None:
+        self._hint_label.update(_flags_hint(self.command, selected_indices, values))
         self.set_class(bool(selected_indices), "-has-flags")
 
 
@@ -92,6 +104,7 @@ class CommandList(ListView):
         self,
         commands: list[Command],
         flags_provider: FlagsProvider | None = None,
+        values_provider: ValuesProvider | None = None,
         on_filter_changed: Callable[[str], None] | None = None,
         **kwargs,
     ) -> None:
@@ -99,6 +112,7 @@ class CommandList(ListView):
         self._all_commands = commands
         self._visible_commands: list[Command] = list(commands)
         self._flags_provider = flags_provider or (lambda _name: set())
+        self._values_provider = values_provider or (lambda _name: {})
         self._on_filter_changed = on_filter_changed
         self.filter_text = ""
         self.border_title = "Commands"
@@ -115,7 +129,8 @@ class CommandList(ListView):
         await self.clear()
         for command in commands:
             selected = self._flags_provider(command.name)
-            await self.append(CommandItem(command, selected))
+            values = self._values_provider(command.name)
+            await self.append(CommandItem(command, selected, values))
         self._apply_filter()
 
     def _apply_filter(self) -> None:
@@ -138,9 +153,10 @@ class CommandList(ListView):
 
     def refresh_flag_indicator(self, command_name: str) -> None:
         selected = self._flags_provider(command_name)
+        values = self._values_provider(command_name)
         for item in self.children:
             if isinstance(item, CommandItem) and item.command.name == command_name:
-                item.set_selected_flags(selected)
+                item.set_selected_flags(selected, values)
 
     def on_key(self, event: events.Key) -> None:
         if event.key == "backspace":

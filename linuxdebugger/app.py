@@ -18,6 +18,7 @@ from .widgets.command_list import CommandItem, CommandList
 from .widgets.filter_bar import FilterBar
 from .widgets.flag_description import FlagDescription
 from .widgets.flag_list import FlagItem, FlagList
+from .widgets.flag_value_modal import FlagValueModal
 from .widgets.custom_time_range_modal import CustomTimeRangeModal
 from .widgets.export_modal import ExportModal
 from .widgets.header import Header
@@ -84,6 +85,7 @@ class LinuxDebuggerApp(App):
         self._process: asyncio.subprocess.Process | None = None
         self._worker = None
         self._flag_selections: dict[tuple[str, str], set[int]] = defaultdict(set)
+        self._flag_values: dict[tuple[str, str], dict[int, str]] = defaultdict(dict)
         self._panel_index = 0
         self._current_command_name: str | None = None
 
@@ -96,6 +98,7 @@ class LinuxDebuggerApp(App):
                 yield CommandList(
                     self._active_panel.commands,
                     flags_provider=self._flags_for,
+                    values_provider=self._values_for,
                     on_filter_changed=self._on_filter_changed,
                     id="commands",
                 )
@@ -115,6 +118,18 @@ class LinuxDebuggerApp(App):
 
     def _flags_for(self, command_name: str) -> set[int]:
         return self._flag_selections[(self._active_panel.name, command_name)]
+
+    def _values_for(self, command_name: str) -> dict[int, str]:
+        return self._flag_values[(self._active_panel.name, command_name)]
+
+    def _command_line(self, command: Command) -> str:
+        values = self._values_for(command.name)
+        tokens = [command.name, *command.base_args]
+        for index in sorted(self._flags_for(command.name)):
+            tokens.extend(command.flags[index].resolved_tokens(values.get(index)))
+        if command.requires_sudo:
+            tokens.insert(0, "sudo")
+        return " ".join(tokens)
 
     def _on_filter_changed(self, filter_text: str) -> None:
         try:
@@ -186,7 +201,8 @@ class LinuxDebuggerApp(App):
             item = message.item
             command = item.command if isinstance(item, CommandItem) else None
             selected = self._flags_for(command.name) if command else set()
-            self.command_description.show(command, selected)
+            values = self._values_for(command.name) if command else {}
+            self.command_description.show(command, selected, values)
         elif isinstance(message.list_view, FlagList):
             item = message.item
             flag = item.flag if isinstance(item, FlagItem) else None
@@ -219,7 +235,8 @@ class LinuxDebuggerApp(App):
         item = command_list.highlighted_child
         command = item.command if isinstance(item, CommandItem) else None
         selected = self._flags_for(command.name) if command else set()
-        self.command_description.show(command, selected)
+        values = self._values_for(command.name) if command else {}
+        self.command_description.show(command, selected, values)
 
     # -- flag picker ----------------------------------------------------
 
@@ -228,22 +245,49 @@ class LinuxDebuggerApp(App):
     ) -> None:
         command = message.command
         selected = self._flags_for(command.name)
+        values = self._values_for(command.name)
 
         self.command_list.display = False
 
         pane = self.query_one("#command-pane", Vertical)
-        flag_list = FlagList(command, selected, id="flags")
+        flag_list = FlagList(command, selected, values, id="flags")
         await pane.mount(flag_list, before=self.command_description)
         await pane.mount(FlagDescription(id="flag-description"))
 
-        self.command_description.show(command, selected)
+        self.command_description.show(command, selected, values)
         flag_list.focus()
 
     def on_flag_list_flag_toggled(self, message: FlagList.FlagToggled) -> None:
         self.command_description.show(
-            message.command, self._flags_for(message.command.name)
+            message.command,
+            self._flags_for(message.command.name),
+            self._values_for(message.command.name),
         )
         self.command_list.refresh_flag_indicator(message.command.name)
+
+    async def on_flag_list_customize_requested(
+        self, message: FlagList.CustomizeRequested
+    ) -> None:
+        self.run_worker(self._customize_flag(message), exclusive=False)
+
+    async def _customize_flag(self, message: FlagList.CustomizeRequested) -> None:
+        command, flag, index = message.command, message.flag, message.flag_index
+        values = self._values_for(command.name)
+        current = values.get(index, flag.default_value() or "")
+
+        value = await self.push_screen_wait(FlagValueModal(flag, current))
+        if value is None:
+            return
+
+        values[index] = value
+        self._flags_for(command.name).add(index)
+
+        try:
+            self.query_one("#flags", FlagList).apply_value(index, value)
+        except NoMatches:
+            pass
+        self.command_description.show(command, self._flags_for(command.name), values)
+        self.command_list.refresh_flag_indicator(command.name)
 
     async def on_flag_list_closed(self, message: FlagList.Closed) -> None:
         await self._close_flag_picker()
@@ -265,7 +309,8 @@ class LinuxDebuggerApp(App):
         item = command_list.highlighted_child
         command = item.command if isinstance(item, CommandItem) else None
         selected = self._flags_for(command.name) if command else set()
-        self.command_description.show(command, selected)
+        values = self._values_for(command.name) if command else {}
+        self.command_description.show(command, selected, values)
 
     # -- running commands -------------------------------------------------
 
@@ -286,12 +331,13 @@ class LinuxDebuggerApp(App):
 
     async def _run_command(self, command: Command, password: str | None) -> None:
         self.log_view.clear_log()
-        self.sub_title = f"running: {command.name}"
+        self.sub_title = f"running: {self._command_line(command)}"
         self._current_command_name = command.name
 
+        values = self._values_for(command.name)
         argv = [command.name, *command.base_args]
         for index in sorted(self._flags_for(command.name)):
-            argv.extend(command.flags[index].tokens)
+            argv.extend(command.flags[index].resolved_tokens(values.get(index)))
 
         # journalctl and dmesg entries carry a syslog severity; ask for
         # structured/decoded output so each line can be prefixed with a

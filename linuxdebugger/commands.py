@@ -3,11 +3,46 @@ from dataclasses import dataclass, field
 
 @dataclass(frozen=True)
 class Flag:
-    """An optional flag that can be toggled on for a command."""
+    """An optional flag that can be toggled on for a command.
+
+    A flag can also carry one customizable value token (e.g. the "today" in
+    "--since today"). `value_index` points at which element of `tokens` that
+    is; `proposed_values` seeds a picker with common choices, but the user
+    can always type something else instead -- the list is just a starting
+    point and can grow over time without any other code needing to change.
+    """
 
     tokens: tuple[str, ...]
     label: str
     description: str
+    value_index: int | None = None
+    proposed_values: tuple[str, ...] = ()
+
+    @property
+    def customizable(self) -> bool:
+        return self.value_index is not None
+
+    def default_value(self) -> str | None:
+        if self.value_index is None:
+            return None
+        return self.tokens[self.value_index]
+
+    def resolved_tokens(self, value: str | None) -> tuple[str, ...]:
+        if value is None or self.value_index is None:
+            return self.tokens
+        return (
+            self.tokens[: self.value_index]
+            + (value,)
+            + self.tokens[self.value_index + 1 :]
+        )
+
+    def resolved_label(self, value: str | None) -> str:
+        if value is None or self.value_index is None:
+            return self.label
+        # The label normally reads like "-p err  errors and worse" -- once
+        # customized, show the actual value in place of the default instead
+        # of the now-stale description suffix.
+        return " ".join(self.resolved_tokens(value))
 
 
 @dataclass(frozen=True)
@@ -70,16 +105,70 @@ LOG_COMMANDS: list[Command] = [
             Flag(
                 ("-p", "err"),
                 "-p err  errors and worse",
-                "Filters the output down to priority 'err' and above (err, crit, "
-                "alert, emerg), hiding informational and warning noise so real "
-                "failures stand out immediately.",
+                "Filters the output down to the priority level you pick and "
+                "everything more severe, hiding the rest so real failures "
+                "stand out immediately.",
+                value_index=1,
+                proposed_values=(
+                    "emerg",
+                    "alert",
+                    "crit",
+                    "err",
+                    "warning",
+                    "notice",
+                    "info",
+                    "debug",
+                ),
             ),
             Flag(
                 ("--since", "today"),
                 "--since today",
-                "Shows only entries logged since midnight today, a quick way to "
-                "cut out old history when you only care about what happened in "
-                "the current session.",
+                "Shows only entries logged since the point in time you pick -- "
+                "accepts journalctl's own time syntax (a keyword like 'today' "
+                "or 'boot', a relative offset like '-1 hour', or an absolute "
+                "'YYYY-MM-DD HH:MM:SS').",
+                value_index=1,
+                proposed_values=(
+                    "today",
+                    "yesterday",
+                    "-15 min",
+                    "-1 hour",
+                    "-1 day",
+                    "boot",
+                ),
+            ),
+            Flag(
+                ("-u", "sshd"),
+                "-u sshd  scope to a unit",
+                "Restricts the journal to just the service you pick -- the "
+                "single most common way to use journalctl when you already "
+                "know which service is misbehaving instead of wading through "
+                "the entire system log.",
+                value_index=1,
+                proposed_values=(
+                    "sshd",
+                    "cron",
+                    "docker",
+                    "NetworkManager",
+                    "systemd-logind",
+                    "networking",
+                ),
+            ),
+            Flag(
+                ("-n", "200"),
+                "-n 200  last N lines",
+                "Shows only the most recent N entries instead of the whole "
+                "history (or waiting on -f), a quick snapshot of 'what "
+                "happened recently' without scrolling through everything.",
+                value_index=1,
+                proposed_values=("50", "100", "200", "500"),
+            ),
+            Flag(
+                ("-r",),
+                "-r  reverse (newest first)",
+                "Prints entries newest-first instead of oldest-first, so the "
+                "most recent activity is right at the top instead of at the "
+                "bottom of a long scroll.",
             ),
         ),
     ),
@@ -106,9 +195,17 @@ LOG_COMMANDS: list[Command] = [
             Flag(
                 ("-l", "err,crit,alert,emerg"),
                 "-l err+  errors and worse",
-                "Filters kernel messages down to priority 'err' and above, "
-                "hiding routine informational boot chatter so hardware and "
-                "driver failures stand out.",
+                "Filters kernel messages down to the priority level you pick "
+                "and everything more severe, hiding routine informational "
+                "boot chatter so hardware and driver failures stand out.",
+                value_index=1,
+                proposed_values=(
+                    "emerg",
+                    "alert,emerg",
+                    "crit,alert,emerg",
+                    "err,crit,alert,emerg",
+                    "warn,err,crit,alert,emerg",
+                ),
             ),
         ),
     ),
@@ -152,6 +249,22 @@ LOG_COMMANDS: list[Command] = [
                 "openSUSE-based distros: logins, sudo usage, SSH attempts and "
                 "other security-relevant events.",
             ),
+            Flag(
+                ("-f", "/var/log/syslog"),
+                "-f <path>  custom file",
+                "Follows any other plain-text log file you type the path to "
+                "-- not every distro's logs fit the four presets above (e.g. "
+                "/var/log/kern.log, /var/log/dpkg.log, or an application's "
+                "own log file under /var/log).",
+                value_index=1,
+                proposed_values=(
+                    "/var/log/syslog",
+                    "/var/log/messages",
+                    "/var/log/kern.log",
+                    "/var/log/dpkg.log",
+                    "/var/log/mail.log",
+                ),
+            ),
         ),
     ),
     Command(
@@ -169,6 +282,22 @@ LOG_COMMANDS: list[Command] = [
                 "Also lists system shutdown and runlevel-change entries "
                 "alongside user logins, so you can see reboots in the same "
                 "timeline as who was logged in around them.",
+            ),
+            Flag(
+                ("-F",),
+                "-F  full timestamps",
+                "Shows complete date and time (including the year) for every "
+                "entry instead of the default abbreviated format, so there's "
+                "no ambiguity about exactly when a login or reboot happened.",
+            ),
+            Flag(
+                ("-n", "50"),
+                "-n 50  limit entries",
+                "Shows only the N most recent entries instead of the entire "
+                "wtmp history, which on a long-lived machine can otherwise be "
+                "thousands of lines.",
+                value_index=1,
+                proposed_values=("10", "25", "50", "100"),
             ),
         ),
     ),
@@ -206,6 +335,29 @@ LOG_COMMANDS: list[Command] = [
                 "is usually the first place to look after a boot that feels "
                 "wrong or a service that silently stopped working.",
             ),
+            Flag(
+                ("status", "sshd"),
+                "status sshd  one unit's status",
+                "Shows the detailed status of the service you pick: whether "
+                "it's active, its main PID, and its most recent log lines — "
+                "the natural next step once you know which unit to look at.",
+                value_index=1,
+                proposed_values=(
+                    "sshd",
+                    "cron",
+                    "docker",
+                    "NetworkManager",
+                    "systemd-logind",
+                    "networking",
+                ),
+            ),
+            Flag(
+                ("list-timers",),
+                "list-timers  scheduled timers",
+                "Lists every systemd timer (the modern cron replacement), "
+                "when it last ran and when it's next due — useful for "
+                "tracking down a scheduled job that silently stopped firing.",
+            ),
         ),
     ),
     Command(
@@ -231,6 +383,23 @@ LOG_COMMANDS: list[Command] = [
                 "Prints sizes in KB/MB/GB instead of raw byte counts, which is "
                 "much faster to read at a glance.",
             ),
+            Flag(
+                ("-t",),
+                "-t  totals row",
+                "Adds a Total row summing memory and swap together, handy for "
+                "seeing overall pressure at a glance instead of adding the "
+                "two rows up yourself.",
+            ),
+            Flag(
+                ("-s", "2"),
+                "-s 2  live update every 2s",
+                "Reprints the memory snapshot repeatedly at the interval (in "
+                "seconds) you pick, like `vmstat`'s repeat mode -- useful for "
+                "watching memory pressure build in real time. Only stops "
+                "when you press Ctrl+K.",
+                value_index=1,
+                proposed_values=("1", "2", "5", "10"),
+            ),
         ),
     ),
     Command(
@@ -246,6 +415,22 @@ LOG_COMMANDS: list[Command] = [
                 "-h  human-readable",
                 "Prints sizes in KB/MB/GB instead of raw 1K-block counts, which "
                 "is much easier to scan quickly.",
+            ),
+            Flag(
+                ("-i",),
+                "-i  inode usage",
+                "Shows inode usage instead of block/space usage. A "
+                "filesystem can run out of inodes (often from huge numbers "
+                "of tiny files) while `df -h` still shows plenty of free "
+                "space, so this catches a failure mode the default view "
+                "completely misses.",
+            ),
+            Flag(
+                ("-T",),
+                "-T  show filesystem type",
+                "Adds a column showing each mount's filesystem type (ext4, "
+                "xfs, tmpfs, overlay...), useful for spotting an unexpected "
+                "filesystem or a pseudo-filesystem eating into the listing.",
             ),
         ),
     ),
@@ -266,6 +451,28 @@ LOG_COMMANDS: list[Command] = [
                 "long format with CPU%, memory% and the full command line for "
                 "each one.",
             ),
+            Flag(
+                ("aux", "--sort=-%cpu"),
+                "aux --sort=-%cpu  top CPU first",
+                "Same as the full listing above, but sorted with the "
+                "heaviest CPU consumers at the top -- the fastest way to spot "
+                "a runaway process without scanning the whole list by eye.",
+            ),
+            Flag(
+                ("aux", "--sort=-%mem"),
+                "aux --sort=-%mem  top memory first",
+                "Same as the full listing above, but sorted with the "
+                "heaviest memory consumers at the top -- useful for tracking "
+                "down what's eating RAM before a machine starts swapping.",
+            ),
+            Flag(
+                ("-ef", "--forest"),
+                "-ef --forest  process tree",
+                "Shows every process with its parent/child relationships "
+                "drawn as an ASCII tree, which makes it obvious what spawned "
+                "what -- handy for tracking down orphaned or zombie children "
+                "of a crashed parent.",
+            ),
         ),
     ),
     Command(
@@ -279,8 +486,19 @@ LOG_COMMANDS: list[Command] = [
             Flag(
                 ("1", "5"),
                 "1 5  sample every second, 5 times",
-                "Prints a fresh line of statistics once a second, five times "
-                "in a row, so you can see whether load is steady or spiking.",
+                "Prints a fresh line of statistics once a second, for however "
+                "many times you pick, so you can see whether load is steady "
+                "or spiking.",
+                value_index=1,
+                proposed_values=("5", "10", "20", "30"),
+            ),
+            Flag(
+                ("-a",),
+                "-a  active/inactive memory",
+                "Breaks the memory columns down into active and inactive "
+                "pages instead of just used/free/buff/cache, a finer-grained "
+                "view of memory pressure when the basic columns aren't "
+                "telling the full story.",
             ),
         ),
     ),
@@ -290,6 +508,16 @@ LOG_COMMANDS: list[Command] = [
             "Lists block devices (disks and partitions) as a tree, along with "
             "their size, filesystem type and mount point. Useful for making "
             "sense of storage layout before diagnosing a disk or mount issue."
+        ),
+        flags=(
+            Flag(
+                ("-f",),
+                "-f  filesystem info",
+                "Adds each partition's filesystem type, label and UUID to "
+                "the tree -- the plain listing shows the storage layout but "
+                "not what's actually formatted on each partition, which this "
+                "fills in.",
+            ),
         ),
     ),
 ]
@@ -333,6 +561,21 @@ NETWORK_COMMANDS: list[Command] = [
                 "resolving them to hostnames and service names, which is "
                 "both faster and less ambiguous.",
             ),
+            Flag(
+                ("-a",),
+                "-a  all sockets",
+                "Shows both listening and established sockets together -- "
+                "without this, listening sockets are hidden unless -l is "
+                "also on, so this is the 'show me everything' option.",
+            ),
+            Flag(
+                ("-s",),
+                "-s  summary statistics",
+                "Prints an overall summary instead of a per-socket listing: "
+                "total counts by protocol and TCP state, a quick way to spot "
+                "e.g. an unusually large number of connections stuck in "
+                "TIME-WAIT or CLOSE-WAIT.",
+            ),
         ),
     ),
     Command(
@@ -363,6 +606,14 @@ NETWORK_COMMANDS: list[Command] = [
                 "Shows packet, byte and error counters per interface — "
                 "useful for spotting dropped packets or a saturated link.",
             ),
+            Flag(
+                ("neigh",),
+                "neigh  ARP/neighbor table",
+                "Lists the kernel's neighbor table -- which MAC address it "
+                "currently has cached for each IP on the local network -- "
+                "the basic layer-2 reachability check for 'can I even see "
+                "this host on the LAN'.",
+            ),
         ),
     ),
     Command(
@@ -379,13 +630,31 @@ NETWORK_COMMANDS: list[Command] = [
                 "-c 4 1.1.1.1  ping Cloudflare DNS",
                 "Sends 4 pings to Cloudflare's public DNS resolver (1.1.1.1), "
                 "a good way to check general internet reachability without "
-                "depending on DNS working.",
+                "depending on DNS working. Customize the target to ping any "
+                "host or IP instead.",
+                value_index=2,
+                proposed_values=(
+                    "1.1.1.1",
+                    "8.8.8.8",
+                    "9.9.9.9",
+                    "google.com",
+                    "github.com",
+                ),
             ),
             Flag(
                 ("-c", "4", "8.8.8.8"),
                 "-c 4 8.8.8.8  ping Google DNS",
                 "Sends 4 pings to Google's public DNS resolver (8.8.8.8), an "
-                "alternative reachability check independent of DNS.",
+                "alternative reachability check independent of DNS. Customize "
+                "the target to ping any host or IP instead.",
+                value_index=2,
+                proposed_values=(
+                    "8.8.8.8",
+                    "1.1.1.1",
+                    "9.9.9.9",
+                    "google.com",
+                    "github.com",
+                ),
             ),
         ),
     ),
@@ -420,6 +689,23 @@ NETWORK_COMMANDS: list[Command] = [
                 "Captures exactly 50 packets and then exits automatically, "
                 "so the capture doesn't run forever and flood the log pane.",
             ),
+            Flag(
+                ("port 443",),
+                "port 443  capture filter",
+                "Restricts the capture to traffic matching a BPF filter "
+                "expression you pick -- without this, every packet on the "
+                "interface is captured, which is noisy on a busy machine. "
+                "Accepts the same syntax as tcpdump's own filter argument "
+                "(e.g. 'port 80', 'host 1.1.1.1', 'icmp').",
+                value_index=0,
+                proposed_values=(
+                    "port 443",
+                    "port 80",
+                    "icmp",
+                    "udp port 53",
+                    "host 1.1.1.1",
+                ),
+            ),
         ),
     ),
     Command(
@@ -441,6 +727,23 @@ NETWORK_COMMANDS: list[Command] = [
                 "connection show  saved connections",
                 "Lists every configured connection profile (Wi-Fi, Ethernet, "
                 "VPN...) and which ones are currently active.",
+            ),
+            Flag(
+                ("general", "status"),
+                "general status  overall connectivity",
+                "Shows NetworkManager's own summary state: overall "
+                "connectivity (full/limited/none), whether networking and "
+                "Wi-Fi are enabled, and the current connection type -- a "
+                "one-line sanity check before digging into individual "
+                "devices or connections.",
+            ),
+            Flag(
+                ("device", "wifi", "list"),
+                "device wifi list  visible networks",
+                "Lists every Wi-Fi network currently visible to this "
+                "machine, with signal strength and security type -- useful "
+                "for confirming the expected network is even in range before "
+                "chasing a connection failure.",
             ),
         ),
     ),
@@ -467,6 +770,33 @@ NETWORK_COMMANDS: list[Command] = [
                 "-b  current boot",
                 "Shows only NetworkManager logs from the current boot, "
                 "skipping older history.",
+            ),
+            Flag(
+                ("-n", "200"),
+                "-n 200  last N lines",
+                "Shows only the most recent N entries instead of the whole "
+                "history, a quick snapshot without scrolling through "
+                "everything NetworkManager has ever logged.",
+                value_index=1,
+                proposed_values=("50", "100", "200", "500"),
+            ),
+            Flag(
+                ("-p", "err"),
+                "-p err  errors and worse",
+                "Filters NetworkManager's log down to the priority level you "
+                "pick and everything more severe, hiding routine connection "
+                "chatter so real failures stand out.",
+                value_index=1,
+                proposed_values=(
+                    "emerg",
+                    "alert",
+                    "crit",
+                    "err",
+                    "warning",
+                    "notice",
+                    "info",
+                    "debug",
+                ),
             ),
         ),
     ),

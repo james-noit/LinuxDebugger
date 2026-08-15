@@ -29,7 +29,12 @@ class CommandDescription(VerticalScroll):
     def compose(self):
         yield Static("", id="body")
 
-    def show(self, command: Command | None, selected_flags: set[int] | None = None) -> None:
+    def show(
+        self,
+        command: Command | None,
+        selected_flags: set[int] | None = None,
+        values: dict[int, str] | None = None,
+    ) -> None:
         body = self.query_one("#body", Static)
 
         if command is None:
@@ -37,9 +42,10 @@ class CommandDescription(VerticalScroll):
             return
 
         selected_flags = selected_flags or set()
+        values = values or {}
         tokens = [command.name, *command.base_args]
         for index in sorted(selected_flags):
-            tokens.extend(command.flags[index].tokens)
+            tokens.extend(command.flags[index].resolved_tokens(values.get(index)))
         preview = " ".join(tokens)
         sudo_note = "  (requires sudo)" if command.requires_sudo else ""
 
@@ -50,7 +56,8 @@ class CommandDescription(VerticalScroll):
             lines.append("Flags applied:")
             for index in sorted(selected_flags):
                 flag = command.flags[index]
-                lines.append(f" • {flag.label} — {flag.description}")
+                label = flag.resolved_label(values.get(index))
+                lines.append(f" • {label} — {flag.description}")
 
         body.update("\n".join(lines))
         self.scroll_home(animate=False)
