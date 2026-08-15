@@ -78,10 +78,34 @@ linuxdebugger
   box above updates live to preview the full command with the flags you've
   selected so far. Selections are remembered per command, independently per
   panel.
-- **Right pane** — scrollable log output. Select any text with the mouse (or
-  keyboard selection) and it is copied to the system clipboard automatically
-  (via `wl-copy`/`xclip`/`xsel` if available, falling back to the terminal's
-  OSC52 clipboard so it also works over SSH).
+- **Right pane** — a "Filters" bar above the log output, then the scrollable
+  log itself. Select any text with the mouse (or keyboard selection) and it
+  is copied to the system clipboard automatically (via `wl-copy`/`xclip`/
+  `xsel` if available, falling back to the terminal's OSC52 clipboard so it
+  also works over SSH).
+- `journalctl` and `dmesg` entries are shown with a colored severity dot (○)
+  in front of each line — red for emerg/alert/crit/err, yellow for warning,
+  cyan for notice, green for info, gray for debug — read from the entry's
+  syslog severity, so it's obvious at a glance which lines matter, even
+  scrolling through a busy `-f`/`-w` stream.
+- The **Filters** bar has two focusable boxes, each showing its own shortcut
+  hint on its border so the interaction doesn't need to be guessed:
+  - **Severity** (`←→ move · ⏎ toggle`) — a row of the 8 syslog severities;
+    move between them and toggle any combination on with Enter/Space (e.g.
+    Error + Warning together). No severity toggled on means "All" (shown as
+    an explicit label, not just a blank row).
+  - **Time range** (`←→ presets · ⏎ custom`) — cycles through All time /
+    Last 5 min / 15 min / hour / 24 hours / 7 days as you arrow through them
+    (applied immediately, live-preview style); "Last 5 min" keeps sliding
+    forward as time passes during a live `-f`/`-w` stream. Enter always
+    opens a custom range prompt regardless of the current preset — type a
+    number (minutes) or a number with a unit, e.g. `45m`, `2h`, `3d`.
+
+  Both filters apply retroactively to everything already captured for the
+  current command, not just new lines, and only affect `journalctl`/`dmesg`
+  output — anything else (which has no severity or timestamp to check)
+  always stays visible regardless of the filters. Filters stay set until you
+  change them, including across different commands.
 - `Ctrl+→` / `Ctrl+←` (or `Alt+C` / `Alt+B`) — switch to the next / previous
   command panel.
 - `Ctrl+K` — stop the currently running command (needed for `-f`/`-w` follow

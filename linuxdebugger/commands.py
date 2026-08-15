@@ -97,13 +97,6 @@ LOG_COMMANDS: list[Command] = [
         requires_sudo=True,
         flags=(
             Flag(
-                ("-T",),
-                "-T  human-readable time",
-                "Converts the kernel's raw monotonic timestamps into normal "
-                "wall-clock date/time strings, which is far easier to line up "
-                "against other logs or against when you noticed the problem.",
-            ),
-            Flag(
                 ("-w",),
                 "-w  follow",
                 "Waits for and prints new kernel messages as they arrive, the "

@@ -1,5 +1,6 @@
 import asyncio
 from collections import defaultdict
+from typing import Callable
 
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -8,16 +9,21 @@ from textual.css.query import NoMatches
 from textual.widgets import Footer, ListView
 
 from .commands import PANELS, Command
+from .severity import LogEntry, format_dmesg_line, format_journal_line
 from .version import load_version
 from .widgets.command_description import CommandDescription
 from .widgets.command_list import CommandItem, CommandList
 from .widgets.filter_bar import FilterBar
 from .widgets.flag_description import FlagDescription
 from .widgets.flag_list import FlagItem, FlagList
+from .widgets.custom_time_range_modal import CustomTimeRangeModal
 from .widgets.header import Header
+from .widgets.log_filters import LogFilters
 from .widgets.log_view import LogView
 from .widgets.panel_tabs import PanelTabs
 from .widgets.password_modal import PasswordModal
+from .widgets.severity_filter import SeverityFilter
+from .widgets.time_range_filter import TimeRangeFilter
 
 load_version()
 
@@ -35,12 +41,15 @@ class LinuxDebuggerApp(App):
     #command-pane {
         width: 42;
     }
+    #log-pane {
+        width: 1fr;
+    }
     CommandList, FlagList {
         height: 1fr;
         border: round $primary;
     }
     LogView {
-        width: 1fr;
+        height: 1fr;
         border: round $primary;
     }
     """
@@ -83,7 +92,9 @@ class LinuxDebuggerApp(App):
                     id="commands",
                 )
                 yield CommandDescription(id="command-description")
-            yield LogView(id="log")
+            with Vertical(id="log-pane"):
+                yield LogFilters(id="log-filters")
+                yield LogView(id="log")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -101,6 +112,29 @@ class LinuxDebuggerApp(App):
             self.query_one("#filter-bar", FilterBar).show(filter_text)
         except NoMatches:
             pass
+
+    def on_severity_filter_changed(self, message: SeverityFilter.Changed) -> None:
+        self._apply_log_filters()
+
+    def on_time_range_filter_changed(self, message: TimeRangeFilter.Changed) -> None:
+        self._apply_log_filters()
+
+    def on_time_range_filter_open_custom(
+        self, message: TimeRangeFilter.OpenCustom
+    ) -> None:
+        self.run_worker(self._open_custom_time_range(), exclusive=False)
+
+    async def _open_custom_time_range(self) -> None:
+        result = await self.push_screen_wait(CustomTimeRangeModal())
+        if result is None:
+            return
+        delta, label = result
+        self.query_one("#time-range-filter", TimeRangeFilter).set_custom(delta, label)
+
+    def _apply_log_filters(self) -> None:
+        severities = self.query_one("#severity-filter", SeverityFilter).selected
+        time_range = self.query_one("#time-range-filter", TimeRangeFilter).current
+        self.log_view.set_filters(severities, time_range)
 
     def _update_panel_tabs(self) -> None:
         self.query_one("#panel-tabs", PanelTabs).show(
@@ -231,6 +265,18 @@ class LinuxDebuggerApp(App):
         argv = [command.name, *command.base_args]
         for index in sorted(self._flags_for(command.name)):
             argv.extend(command.flags[index].tokens)
+
+        # journalctl and dmesg entries carry a syslog severity; ask for
+        # structured/decoded output so each line can be prefixed with a
+        # colored severity dot instead of showing raw, unmarked text.
+        stdout_formatter = None
+        if command.name == "journalctl":
+            argv.extend(["-o", "json"])
+            stdout_formatter = format_journal_line
+        elif command.name == "dmesg":
+            argv.extend(["-x", "-T"])
+            stdout_formatter = format_dmesg_line
+
         if command.requires_sudo:
             argv = ["sudo", "-k", "-S", "-p", "", *argv]
 
@@ -260,7 +306,9 @@ class LinuxDebuggerApp(App):
                 process.stdin.close()
 
         try:
-            stdout_task = asyncio.create_task(self._pump_stream(process.stdout, ""))
+            stdout_task = asyncio.create_task(
+                self._pump_stream(process.stdout, "", stdout_formatter)
+            )
             stderr_task = asyncio.create_task(self._pump_stream(process.stderr, "! "))
             await process.wait()
             await asyncio.gather(stdout_task, stderr_task)
@@ -274,12 +322,23 @@ class LinuxDebuggerApp(App):
             self._process = None
             self.sub_title = "log monitor"
 
-    async def _pump_stream(self, stream: asyncio.StreamReader, prefix: str) -> None:
+    async def _pump_stream(
+        self,
+        stream: asyncio.StreamReader,
+        prefix: str,
+        formatter: Callable[[str], LogEntry | None] | None = None,
+    ) -> None:
         while True:
             line = await stream.readline()
             if not line:
                 break
             text = line.decode(errors="replace")
+            if formatter is not None:
+                entry = formatter(text)
+                if entry is None:
+                    continue
+                self.log_view.append_entry(entry)
+                continue
             self.log_view.append_text(prefix + text if prefix else text)
 
     def action_stop_command(self) -> None:
