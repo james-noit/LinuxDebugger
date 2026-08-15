@@ -78,12 +78,23 @@ linuxdebugger
   box above updates live to preview the full command with the flags you've
   selected so far. Selections are remembered per command, independently per
   panel.
-- **Right pane** — a "Filters" bar above the log output, then the scrollable
-  log itself. Select text with the mouse (or keyboard selection) and it's
-  copied to the system clipboard automatically (via `wl-copy`/`xclip`/`xsel`
-  if available, falling back to the terminal's OSC52 clipboard so it also
-  works over SSH). A plain click (no drag) on a single line copies just that
-  line and shows a notification confirming what was copied.
+- **Right pane** — a "Filters" bar, a search bar, then the scrollable log
+  itself. Select text with the mouse (or keyboard selection) and it's copied
+  to the system clipboard automatically (via `wl-copy`/`xclip`/`xsel` if
+  available, falling back to the terminal's OSC52 clipboard so it also works
+  over SSH). A plain click (no drag) on a single line copies just that line
+  and shows a notification confirming what was copied.
+- Click the log pane and just start typing to **search** it by word/phrase —
+  the bar above the log shows what you've typed and how many lines match
+  (`🔎 docker▏  (4 matches)`). Backspace edits it, Escape clears it. Search
+  stacks with the severity/time filters (all three narrow the same view
+  together) and, like them, only really filters `journalctl`/`dmesg` lines
+  meaningfully since everything else is just matched against its raw text.
+- With the log pane focused, **↑/↓** move a selection cursor between visible
+  entries — marked with a `▶` and highlighted — instead of scrolling
+  line-by-line, and **Enter** opens the selected entry in a detail view —
+  handy for a long line that's cut off — with its own **Copy** action (`C`
+  or `Enter`).
 - `journalctl` and `dmesg` entries are shown with a colored severity dot (○)
   in front of each line — red for emerg/alert/crit/err, yellow for warning,
   cyan for notice, green for info, gray for debug — read from the entry's
@@ -106,8 +117,9 @@ linuxdebugger
   current command, not just new lines, and only affect `journalctl`/`dmesg`
   output — anything else (which has no severity or timestamp to check)
   always stays visible regardless of the filters. Filters stay set until you
-  change them, including across different commands. `Ctrl+R` clears both at
-  once, from anywhere — no need to focus either filter box first.
+  change them, including across different commands. `Ctrl+R` clears the
+  severity filter, time range, *and* the search box at once, from anywhere —
+  no need to focus any of them first.
 - `Ctrl+→` / `Ctrl+←` (or `Alt+C` / `Alt+B`) — switch to the next / previous
   command panel.
 - `Ctrl+K` — stop the currently running command (needed for `-f`/`-w` follow

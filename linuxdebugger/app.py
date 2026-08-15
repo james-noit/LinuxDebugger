@@ -21,7 +21,9 @@ from .widgets.flag_list import FlagItem, FlagList
 from .widgets.custom_time_range_modal import CustomTimeRangeModal
 from .widgets.export_modal import ExportModal
 from .widgets.header import Header
+from .widgets.log_entry_modal import LogEntryModal
 from .widgets.log_filters import LogFilters
+from .widgets.log_search_bar import LogSearchBar
 from .widgets.log_view import LogView
 from .widgets.panel_tabs import PanelTabs
 from .widgets.password_modal import PasswordModal
@@ -100,7 +102,8 @@ class LinuxDebuggerApp(App):
                 yield CommandDescription(id="command-description")
             with Vertical(id="log-pane"):
                 yield LogFilters(id="log-filters")
-                yield LogView(id="log")
+                yield LogSearchBar(id="log-search-bar")
+                yield LogView(id="log", on_search_changed=self._on_log_search_changed)
         yield Footer()
 
     def on_mount(self) -> None:
@@ -118,6 +121,15 @@ class LinuxDebuggerApp(App):
             self.query_one("#filter-bar", FilterBar).show(filter_text)
         except NoMatches:
             pass
+
+    def _on_log_search_changed(self, text: str, count: int) -> None:
+        try:
+            self.query_one("#log-search-bar", LogSearchBar).show(text, count)
+        except NoMatches:
+            pass
+
+    def on_log_view_open_entry(self, message: LogView.OpenEntry) -> None:
+        self.push_screen(LogEntryModal(message.text))
 
     def on_severity_filter_changed(self, message: SeverityFilter.Changed) -> None:
         self._apply_log_filters()
@@ -147,6 +159,7 @@ class LinuxDebuggerApp(App):
             return
         self.query_one("#severity-filter", SeverityFilter).reset()
         self.query_one("#time-range-filter", TimeRangeFilter).reset()
+        self.log_view.set_search("")
         self.notify("Filters cleared", timeout=2)
 
     def _update_panel_tabs(self) -> None:

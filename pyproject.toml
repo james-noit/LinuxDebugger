@@ -1,6 +1,6 @@
 [project]
 name = "linuxdebugger"
-version = "0.6.3"
+version = "0.7.0"
 description = "Distro-agnostic Linux system debugging TUI, starting with log monitoring"
 requires-python = ">=3.10"
 dependencies = [
