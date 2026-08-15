@@ -61,6 +61,14 @@ class TimeRangeFilter(Static, can_focus=True):
     def current(self) -> timedelta | None:
         return self._custom if self._custom is not None else PRESETS[self._preset_index][1]
 
+    def reset(self) -> None:
+        if self._preset_index == 0 and self._custom is None:
+            return
+        self._custom = None
+        self._preset_index = 0
+        self._refresh_content()
+        self.post_message(self.Changed(self.current))
+
     def action_cycle(self, direction: int) -> None:
         self._custom = None
         self._preset_index = (self._preset_index + direction) % len(PRESETS)

@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 
 from rich.text import Text
+from textual import events
 from textual.selection import Selection
 from textual.widgets import RichLog
 
@@ -92,6 +93,32 @@ class LogView(RichLog):
                 self.write(entry.styled, scroll_end=False)
                 self._visible_plain.append(entry.plain)
         self.scroll_end(animate=False)
+
+    @property
+    def is_filtered(self) -> bool:
+        return bool(self._severities) or self._time_range is not None
+
+    @property
+    def visible_plain(self) -> list[str]:
+        return list(self._visible_plain)
+
+    @property
+    def all_plain(self) -> list[str]:
+        return [entry.plain for entry in self._all_entries]
+
+    def on_click(self, event: events.Click) -> None:
+        # A plain click (no drag) never reaches selection_updated -- Textual
+        # only calls that for an actual mouse-drag selection -- so this is
+        # the single-line-click path exclusively; the two never double-fire
+        # for the same interaction.
+        index = event.y + int(self.scroll_offset.y)
+        if not (0 <= index < len(self._visible_plain)):
+            return
+        text = self._visible_plain[index]
+        if not text or not copy_to_clipboard(self.app, text):
+            return
+        preview = text if len(text) <= 60 else text[:57] + "..."
+        self.notify(f"Copied: {preview}", title="Line copied")
 
     def get_selection(self, selection: Selection) -> tuple[str, str] | None:
         if not self._visible_plain:

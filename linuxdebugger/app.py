@@ -1,5 +1,7 @@
 import asyncio
 from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
 from typing import Callable
 
 from textual.app import App, ComposeResult
@@ -17,6 +19,7 @@ from .widgets.filter_bar import FilterBar
 from .widgets.flag_description import FlagDescription
 from .widgets.flag_list import FlagItem, FlagList
 from .widgets.custom_time_range_modal import CustomTimeRangeModal
+from .widgets.export_modal import ExportModal
 from .widgets.header import Header
 from .widgets.log_filters import LogFilters
 from .widgets.log_view import LogView
@@ -57,6 +60,8 @@ class LinuxDebuggerApp(App):
     BINDINGS = [
         ("ctrl+k", "stop_command", "Stop running command"),
         ("ctrl+l", "clear_log", "Clear log"),
+        ("ctrl+e", "export_log", "Export log"),
+        ("ctrl+r", "reset_filters", "Reset filters"),
         ("ctrl+q", "quit", "Quit"),
         # alt+c/alt+b are the documented shortcut, but terminals send Alt
         # combos as a bare Escape followed by the letter as two separate
@@ -78,6 +83,7 @@ class LinuxDebuggerApp(App):
         self._worker = None
         self._flag_selections: dict[tuple[str, str], set[int]] = defaultdict(set)
         self._panel_index = 0
+        self._current_command_name: str | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -135,6 +141,13 @@ class LinuxDebuggerApp(App):
         severities = self.query_one("#severity-filter", SeverityFilter).selected
         time_range = self.query_one("#time-range-filter", TimeRangeFilter).current
         self.log_view.set_filters(severities, time_range)
+
+    def action_reset_filters(self) -> None:
+        if not self.log_view.is_filtered:
+            return
+        self.query_one("#severity-filter", SeverityFilter).reset()
+        self.query_one("#time-range-filter", TimeRangeFilter).reset()
+        self.notify("Filters cleared", timeout=2)
 
     def _update_panel_tabs(self) -> None:
         self.query_one("#panel-tabs", PanelTabs).show(
@@ -261,6 +274,7 @@ class LinuxDebuggerApp(App):
     async def _run_command(self, command: Command, password: str | None) -> None:
         self.log_view.clear_log()
         self.sub_title = f"running: {command.name}"
+        self._current_command_name = command.name
 
         argv = [command.name, *command.base_args]
         for index in sorted(self._flags_for(command.name)):
@@ -349,6 +363,37 @@ class LinuxDebuggerApp(App):
 
     def action_clear_log(self) -> None:
         self.log_view.clear_log()
+
+    def action_export_log(self) -> None:
+        if not self.log_view.all_plain:
+            self.notify("Nothing to export yet.", severity="warning")
+            return
+        self.run_worker(self._export_log(), exclusive=False)
+
+    async def _export_log(self) -> None:
+        log_view = self.log_view
+        command_name = self._current_command_name or "log"
+        timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        default_path = str(Path.home() / f"linuxdebugger-{command_name}-{timestamp}.log")
+
+        result = await self.push_screen_wait(
+            ExportModal(has_filter=log_view.is_filtered, default_path=default_path)
+        )
+        if result is None:
+            return
+        scope, path_str = result
+
+        lines = log_view.visible_plain if scope == "filtered" else log_view.all_plain
+        path = Path(path_str).expanduser()
+
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("\n".join(lines) + "\n")
+        except OSError as error:
+            self.notify(f"Export failed: {error}", severity="error", timeout=6)
+            return
+
+        self.notify(f"Exported {len(lines)} lines to {path}", title="Export complete")
 
 
 def run() -> None:

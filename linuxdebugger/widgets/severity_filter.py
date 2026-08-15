@@ -49,6 +49,13 @@ class SeverityFilter(Static, can_focus=True):
     def selected(self) -> set[str]:
         return set(self._selected)
 
+    def reset(self) -> None:
+        if not self._selected:
+            return
+        self._selected.clear()
+        self._refresh_content()
+        self.post_message(self.Changed(self.selected))
+
     def action_move(self, direction: int) -> None:
         self._cursor = (self._cursor + direction) % len(SEVERITY_ORDER)
         self._refresh_content()

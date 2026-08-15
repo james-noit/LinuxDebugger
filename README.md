@@ -79,10 +79,11 @@ linuxdebugger
   selected so far. Selections are remembered per command, independently per
   panel.
 - **Right pane** — a "Filters" bar above the log output, then the scrollable
-  log itself. Select any text with the mouse (or keyboard selection) and it
-  is copied to the system clipboard automatically (via `wl-copy`/`xclip`/
-  `xsel` if available, falling back to the terminal's OSC52 clipboard so it
-  also works over SSH).
+  log itself. Select text with the mouse (or keyboard selection) and it's
+  copied to the system clipboard automatically (via `wl-copy`/`xclip`/`xsel`
+  if available, falling back to the terminal's OSC52 clipboard so it also
+  works over SSH). A plain click (no drag) on a single line copies just that
+  line and shows a notification confirming what was copied.
 - `journalctl` and `dmesg` entries are shown with a colored severity dot (○)
   in front of each line — red for emerg/alert/crit/err, yellow for warning,
   cyan for notice, green for info, gray for debug — read from the entry's
@@ -105,12 +106,19 @@ linuxdebugger
   current command, not just new lines, and only affect `journalctl`/`dmesg`
   output — anything else (which has no severity or timestamp to check)
   always stays visible regardless of the filters. Filters stay set until you
-  change them, including across different commands.
+  change them, including across different commands. `Ctrl+R` clears both at
+  once, from anywhere — no need to focus either filter box first.
 - `Ctrl+→` / `Ctrl+←` (or `Alt+C` / `Alt+B`) — switch to the next / previous
   command panel.
 - `Ctrl+K` — stop the currently running command (needed for `-f`/`-w` follow
   commands, which stream forever until stopped).
 - `Ctrl+L` — clear the log pane.
+- `Ctrl+E` — export the log to a file. Asks whether to export just what's
+  currently **visible** (respecting the active severity/time filters) or
+  **everything** captured for the current command regardless of filters,
+  plus a destination path (`Ctrl+T` inside that dialog toggles which scope
+  is selected, since arrow keys are busy moving the cursor in the path
+  field). Defaults to the filtered scope when a filter is active.
 - `Ctrl+Q` — quit.
 
 ## Version
