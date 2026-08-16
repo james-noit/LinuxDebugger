@@ -11,6 +11,7 @@ from textual.css.query import NoMatches
 from textual.widgets import Footer, ListView
 
 from .commands import PANELS, Command
+from .macros import Macro
 from .severity import LogEntry, format_dmesg_line, format_journal_line
 from .version import load_version
 from .widgets.command_description import CommandDescription
@@ -25,7 +26,11 @@ from .widgets.header import Header
 from .widgets.log_entry_modal import LogEntryModal
 from .widgets.log_filters import LogFilters
 from .widgets.log_search_bar import LogSearchBar
+from .widgets.log_macro_pane import LogMacroPane
 from .widgets.log_view import LogView
+from .widgets.macro_confirm_modal import MacroConfirmModal
+from .widgets.macro_list import MacroList
+from .widgets.macro_view import MacroView
 from .widgets.panel_tabs import PanelTabs
 from .widgets.password_modal import PasswordModal
 from .widgets.severity_filter import SeverityFilter
@@ -50,11 +55,14 @@ class LinuxDebuggerApp(App):
     #log-pane {
         width: 1fr;
     }
+    #log-macro-pane {
+        height: 1fr;
+    }
     CommandList, FlagList {
         height: 1fr;
         border: round $primary;
     }
-    LogView {
+    LogView, MacroView {
         height: 1fr;
         border: round $primary;
     }
@@ -65,6 +73,7 @@ class LinuxDebuggerApp(App):
         ("ctrl+l", "clear_log", "Clear log"),
         ("ctrl+e", "export_log", "Export log"),
         ("ctrl+r", "reset_filters", "Reset filters"),
+        ("ctrl+d", "toggle_description", "Toggle description"),
         ("ctrl+q", "quit", "Quit"),
         # alt+c/alt+b are the documented shortcut, but terminals send Alt
         # combos as a bare Escape followed by the letter as two separate
@@ -88,6 +97,7 @@ class LinuxDebuggerApp(App):
         self._flag_values: dict[tuple[str, str], dict[int, str]] = defaultdict(dict)
         self._panel_index = 0
         self._current_command_name: str | None = None
+        self._show_description = True
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -106,15 +116,25 @@ class LinuxDebuggerApp(App):
             with Vertical(id="log-pane"):
                 yield LogFilters(id="log-filters")
                 yield LogSearchBar(id="log-search-bar")
-                yield LogView(id="log", on_search_changed=self._on_log_search_changed)
+                yield LogMacroPane(
+                    LogView(id="log", on_search_changed=self._on_log_search_changed),
+                    MacroView(id="macro-view"),
+                    id="log-macro-pane",
+                )
         yield Footer()
 
     def on_mount(self) -> None:
         self._update_panel_tabs()
+        self.log_macro_pane.set_macro_available(False)
+        self.run_worker(self._sync_macro_list(), exclusive=False)
 
     @property
     def _active_panel(self):
         return PANELS[self._panel_index]
+
+    @property
+    def log_macro_pane(self) -> LogMacroPane:
+        return self.query_one("#log-macro-pane", LogMacroPane)
 
     def _flags_for(self, command_name: str) -> set[int]:
         return self._flag_selections[(self._active_panel.name, command_name)]
@@ -177,6 +197,16 @@ class LinuxDebuggerApp(App):
         self.log_view.set_search("")
         self.notify("Filters cleared", timeout=2)
 
+    def action_toggle_description(self) -> None:
+        self._show_description = not self._show_description
+        self.command_description.display = self._show_description
+        try:
+            self.query_one("#flag-description", FlagDescription).display = (
+                self._show_description
+            )
+        except NoMatches:
+            pass
+
     def _update_panel_tabs(self) -> None:
         self.query_one("#panel-tabs", PanelTabs).show(
             [panel.name for panel in PANELS], self._panel_index
@@ -227,9 +257,13 @@ class LinuxDebuggerApp(App):
 
         self._panel_index = (self._panel_index + direction) % len(PANELS)
         self._update_panel_tabs()
+        # Leaving the panel invalidates any macro result shown for it, so
+        # the toggle goes away entirely here (not just a view switch).
+        self.log_macro_pane.set_macro_available(False)
 
         command_list = self.command_list
         await command_list.set_commands(self._active_panel.commands)
+        await self._sync_macro_list()
         command_list.focus()
 
         item = command_list.highlighted_child
@@ -237,6 +271,62 @@ class LinuxDebuggerApp(App):
         selected = self._flags_for(command.name) if command else set()
         values = self._values_for(command.name) if command else {}
         self.command_description.show(command, selected, values)
+
+    # -- macros -----------------------------------------------------------
+
+    async def _sync_macro_list(self) -> None:
+        """Mounts/removes the Macros box so it's only present on panels
+        that actually define macros (currently just GPU)."""
+        try:
+            existing = self.query_one("#macros", MacroList)
+        except NoMatches:
+            existing = None
+
+        macros = self._active_panel.macros
+        if macros and existing is None:
+            pane = self.query_one("#command-pane", Vertical)
+            await pane.mount(MacroList(macros, id="macros"), before=self.command_description)
+        elif not macros and existing is not None:
+            await existing.remove()
+
+    def on_macro_list_run_macro(self, message: MacroList.RunMacro) -> None:
+        self.run_worker(self._confirm_and_run_macro(message.macro), exclusive=False)
+
+    async def _confirm_and_run_macro(self, macro: Macro) -> None:
+        confirmed = await self.push_screen_wait(MacroConfirmModal(macro))
+        if not confirmed:
+            return
+        self._worker = self.run_worker(self._run_macro(macro), exclusive=True)
+
+    async def _run_macro(self, macro: Macro) -> None:
+        pane = self.log_macro_pane
+        log_view = pane.log_view
+        macro_view = pane.macro_view
+
+        # The raw log holds the commands the macro actually ran; the macro
+        # view is the parsed/templated read of that same data. Both live in
+        # the same pane, flipped between with Ctrl+Right/Ctrl+Left.
+        log_view.clear_log()
+        log_view.border_title = f"Log output — {macro.name}"
+        macro_view.border_title = f"Macro output — {macro.name}"
+        macro_view.show_message(f"Running macro: {macro.name} ...")
+        pane.set_macro_available(True)
+        pane.show_macro()
+
+        self.sub_title = f"running macro: {macro.name}"
+        run = await macro.run()
+        log_view.append_text(run.raw_log)
+        macro_view.show(run.result.title, run.result.fields)
+        self.sub_title = "log monitor"
+
+    def _restore_log_view(self) -> None:
+        # Switches the view back to the raw log without discarding a macro
+        # result that might already be there -- Ctrl+Right still flips back
+        # to it afterward, until the panel itself is switched away from.
+        try:
+            self.log_macro_pane.show_log()
+        except NoMatches:
+            pass
 
     # -- flag picker ----------------------------------------------------
 
@@ -247,12 +337,20 @@ class LinuxDebuggerApp(App):
         selected = self._flags_for(command.name)
         values = self._values_for(command.name)
 
+        # Flags take over the spot where Commands (and Macros, if present)
+        # were -- an annex room, not another box squeezed in underneath.
         self.command_list.display = False
+        try:
+            self.query_one("#macros", MacroList).display = False
+        except NoMatches:
+            pass
 
         pane = self.query_one("#command-pane", Vertical)
         flag_list = FlagList(command, selected, values, id="flags")
         await pane.mount(flag_list, before=self.command_description)
-        await pane.mount(FlagDescription(id="flag-description"))
+        flag_description = FlagDescription(id="flag-description")
+        await pane.mount(flag_description)
+        flag_description.display = self._show_description
 
         self.command_description.show(command, selected, values)
         flag_list.focus()
@@ -304,6 +402,10 @@ class LinuxDebuggerApp(App):
 
         command_list = self.command_list
         command_list.display = True
+        try:
+            self.query_one("#macros", MacroList).display = True
+        except NoMatches:
+            pass
         command_list.focus()
 
         item = command_list.highlighted_child
@@ -333,6 +435,7 @@ class LinuxDebuggerApp(App):
 
     async def _run_command(self, command: Command, password: str | None) -> None:
         command_line = self._command_line(command)
+        self._restore_log_view()
         self.log_view.clear_log()
         self.log_view.border_title = f"Log output — {command_line}"
         self.sub_title = f"running: {command_line}"

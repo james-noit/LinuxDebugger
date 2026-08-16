@@ -1,5 +1,7 @@
 from dataclasses import dataclass, field
 
+from .macros import GPU_MACROS, Macro
+
 
 @dataclass(frozen=True)
 class Flag:
@@ -58,6 +60,7 @@ class Command:
 class CommandPanel:
     name: str
     commands: list[Command]
+    macros: list[Macro] = field(default_factory=list)
 
 
 LOG_COMMANDS: list[Command] = [
@@ -991,7 +994,7 @@ GPU_COMMANDS: list[Command] = [
             "machine actually using the driver you think it is (nvidia vs. "
             "nouveau, amdgpu vs. radeon, i915...)."
         ),
-        base_args=("-nnk", "-d", "::03"),
+        base_args=("-nnk", "-d", "::03xx"),
         flags=(
             Flag(
                 ("-v",),
@@ -1108,5 +1111,5 @@ GPU_COMMANDS: list[Command] = [
 PANELS: list[CommandPanel] = [
     CommandPanel("Logs", LOG_COMMANDS),
     CommandPanel("Network", NETWORK_COMMANDS),
-    CommandPanel("GPU", GPU_COMMANDS),
+    CommandPanel("GPU", GPU_COMMANDS, macros=GPU_MACROS),
 ]

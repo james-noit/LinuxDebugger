@@ -66,6 +66,32 @@ linuxdebugger
   text instead; Ctrl+←/→ don't have that problem, so they're the reliable
   choice and what's shown in the UI). Switching panels resets the filter and
   closes any open flag picker.
+- **Macros** — some panels (currently just GPU) also show a small "Macros"
+  box between the command list and the description. A macro is a fixed
+  combination of commands that answers one specific debugging question in a
+  single shot, rather than a single command you configure with flags.
+  Navigate to it (mouse click, or **Tab**) and press **Enter** — a
+  confirmation dialog lists the exact commands the macro is about to run
+  before anything executes. Once confirmed, the log pane shows the raw
+  output of each command the macro ran; **Ctrl+→**/**Ctrl+←** flips that
+  same pane over to a "Macro output" view of that same data reduced to a
+  fixed set of labelled fields — the same gesture used to switch panels in
+  the Commands widget, just scoped to whichever of the two is focused, with
+  a small indicator above them showing which one you're looking at. The
+  toggle stays available even after running another command in the same
+  panel, until you switch panels entirely. Opening a command's flags (→)
+  takes over the space where the command
+  list (and Macros box, if present) was, the same way it already did
+  before Macros existed. The first macro, **Identify GPU information**,
+  runs a kernel-first decision tree: vendor, model and kernel driver come
+  straight from `/sys/bus/pci/devices` — no package needed at all — and
+  that kernel driver (`nvidia`, `amdgpu`/`radeon`, `i915`/`xe`...) decides
+  which vendor-specific branch runs next (NVIDIA via `/proc/driver/nvidia`
+  and `nvidia-smi`, AMD via the amdgpu VRAM sysfs counter and ROCm's
+  `rocm-smi`/`rocminfo`), plus vendor-agnostic `glxinfo`/`vulkaninfo`
+  checks either way. Every external tool is only invoked after confirming
+  with `shutil.which` that it's actually installed, never assumed; fields
+  that stay undeterminable show as "unknown" rather than a guess.
 - Commands are shown without flags. Use the arrow keys to navigate the list,
   or just start typing to filter by name — the typed text always shows in
   the bar right above the list (`🔎 type to filter…` when empty). Commands
@@ -138,6 +164,9 @@ linuxdebugger
 - `Ctrl+K` — stop the currently running command (needed for `-f`/`-w` follow
   commands, which stream forever until stopped).
 - `Ctrl+L` — clear the log pane.
+- `Ctrl+D` — show/hide the "Description" box under the command list (and
+  the matching "Flag" box while a flag list is open). On by default;
+  hiding it gives the command list more room.
 - `Ctrl+E` — export the log to a file. Asks whether to export just what's
   currently **visible** (respecting the active severity/time filters) or
   **everything** captured for the current command regardless of filters,
