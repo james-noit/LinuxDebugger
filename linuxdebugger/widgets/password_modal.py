@@ -34,15 +34,16 @@ class PasswordModal(ModalScreen[str | None]):
 
     BINDINGS = [("escape", "cancel", "Cancel")]
 
-    def __init__(self, command: Command, error: str | None = None) -> None:
+    def __init__(self, command: Command, command_line: str, error: str | None = None) -> None:
         super().__init__()
         self.command = command
+        self.command_line = command_line
         self.error = error
 
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label("⚠ This command requires sudo access", id="title")
-            yield Label(f"Command: {self.command.name}")
+            yield Label(f"Command: {self.command_line}")
             if self.error:
                 yield Static(self.error, id="error")
             yield Input(placeholder="sudo password", password=True, id="password")

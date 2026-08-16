@@ -324,14 +324,18 @@ class LinuxDebuggerApp(App):
     async def _handle_command(self, command: Command) -> None:
         password = None
         if command.requires_sudo:
-            password = await self.push_screen_wait(PasswordModal(command))
+            password = await self.push_screen_wait(
+                PasswordModal(command, self._command_line(command))
+            )
             if password is None:
                 return
         await self._run_command(command, password)
 
     async def _run_command(self, command: Command, password: str | None) -> None:
+        command_line = self._command_line(command)
         self.log_view.clear_log()
-        self.sub_title = f"running: {self._command_line(command)}"
+        self.log_view.border_title = f"Log output — {command_line}"
+        self.sub_title = f"running: {command_line}"
         self._current_command_name = command.name
 
         values = self._values_for(command.name)

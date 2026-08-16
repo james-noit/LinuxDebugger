@@ -51,16 +51,21 @@ linuxdebugger
   command list itself, and a description box, stacked top to bottom.
 - **Panels** — commands are grouped into panels: **Logs** (`journalctl`,
   `dmesg`, `tail`, `last`, `who`, `systemctl`, `uptime`, `free`, `df`, `ps`,
-  `vmstat`, `lsblk`) and **Network** (`ss`, `ip`, `ping`, `tcpdump`, `nmcli`,
-  a NetworkManager-scoped `journalctl`). The tag row above the list shows
-  both panel names, with the active one highlighted, plus the shortcuts to
-  switch: **Ctrl+→** moves to the next panel, **Ctrl+←** moves back
-  (**Alt+C** / **Alt+B** also work, but terminals send Alt combos as a bare
-  Escape followed by the letter as two separate keystrokes, so if there's
-  any delay between them — common over SSH or on a busy system — the letter
-  falls through as filter text instead; Ctrl+←/→ don't have that problem, so
-  they're the reliable choice and what's shown in the UI). Switching panels
-  resets the filter and closes any open flag picker.
+  `vmstat`, `lsblk`), **Network** (`ss`, `ip`, `ping`, `tcpdump`, `nmcli`,
+  a NetworkManager-scoped `journalctl`), and **GPU** (`nvidia-smi`,
+  `rocm-smi`, `rocminfo`, `glxinfo`, `vulkaninfo`, `clinfo`, `lspci` scoped
+  to display controllers, a GPU-driver-scoped `journalctl`, `radeontop`,
+  `intel_gpu_top` — whichever ones apply to the machine's actual GPU vendor
+  simply work, the rest report "command not found"). The tag row above the
+  list shows all panel names,
+  with the active one highlighted, plus the shortcuts to switch: **Ctrl+→**
+  moves to the next panel, **Ctrl+←** moves back (**Alt+C** / **Alt+B** also
+  work, but terminals send Alt combos as a bare Escape followed by the
+  letter as two separate keystrokes, so if there's any delay between them —
+  common over SSH or on a busy system — the letter falls through as filter
+  text instead; Ctrl+←/→ don't have that problem, so they're the reliable
+  choice and what's shown in the UI). Switching panels resets the filter and
+  closes any open flag picker.
 - Commands are shown without flags. Use the arrow keys to navigate the list,
   or just start typing to filter by name — the typed text always shows in
   the bar right above the list (`🔎 type to filter…` when empty). Commands

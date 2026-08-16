@@ -802,8 +802,311 @@ NETWORK_COMMANDS: list[Command] = [
     ),
 ]
 
+GPU_COMMANDS: list[Command] = [
+    Command(
+        name="nvidia-smi",
+        description=(
+            "NVIDIA's own GPU management tool: a single-shot table of every "
+            "NVIDIA GPU in the machine, its driver/CUDA version, temperature, "
+            "power draw, memory usage and any processes currently using it. "
+            "Only works if an NVIDIA GPU and its proprietary driver are "
+            "installed — reports 'command not found' otherwise, which is "
+            "itself a useful signal on an unfamiliar machine."
+        ),
+        flags=(
+            Flag(
+                ("-l", "1"),
+                "-l 1  live refresh every 1s",
+                "Reprints the full status table repeatedly at the interval "
+                "(in seconds) you pick instead of a single snapshot, so you "
+                "can watch utilization, memory and temperature change in "
+                "real time while reproducing a workload. Only stops when you "
+                "press Ctrl+K.",
+                value_index=1,
+                proposed_values=("1", "2", "5", "10"),
+            ),
+            Flag(
+                ("pmon",),
+                "pmon  per-process monitor",
+                "Streams per-process GPU utilization and memory usage, one "
+                "line per process per second — the fastest way to see "
+                "exactly which process is actually using the GPU, rather "
+                "than just the aggregate total.",
+            ),
+            Flag(
+                (
+                    "--query-gpu=utilization.gpu,utilization.memory,"
+                    "memory.used,memory.total,temperature.gpu",
+                    "--format=csv,noheader",
+                ),
+                "--query-gpu=...  compact utilization line",
+                "Prints just the numbers that usually matter — GPU%, memory "
+                "%, memory used/total and temperature — as one compact CSV "
+                "line instead of the full table, handy for a quick glance "
+                "or for pasting into a bug report.",
+            ),
+        ),
+    ),
+    Command(
+        name="rocm-smi",
+        description=(
+            "AMD's ROCm System Management Interface — the amdgpu/ROCm "
+            "equivalent of nvidia-smi. A single-shot table of every ROCm-"
+            "visible AMD GPU: temperature, power draw, clocks, fan and "
+            "utilization. Only works if the ROCm stack is installed and the "
+            "GPU is supported — reports 'command not found' or an empty "
+            "device list otherwise, which is itself a useful signal."
+        ),
+        flags=(
+            Flag(
+                ("--showallinfo",),
+                "--showallinfo  everything",
+                "Dumps every metric rocm-smi knows about a single device: "
+                "clocks, voltage, power, temperature, memory, PCIe link "
+                "state and more, instead of just the default summary table.",
+            ),
+            Flag(
+                ("--showuse",),
+                "--showuse  GPU/memory usage %",
+                "Shows just the GPU and memory-controller busy percentages "
+                "— the ROCm equivalent of the 'utilization.gpu' column in "
+                "nvidia-smi, useful for a quick 'is it actually working "
+                "hard' check.",
+            ),
+            Flag(
+                ("--showmeminfo", "vram"),
+                "--showmeminfo vram  memory detail",
+                "Shows used/total memory for the pool you pick -- VRAM "
+                "(dedicated GPU memory), visible VRAM (the CPU-accessible "
+                "slice of it), GTT (system memory usable by the GPU), or "
+                "all three -- useful when a compute job is running out of "
+                "GPU memory.",
+                value_index=1,
+                proposed_values=("vram", "vis_vram", "gtt", "all"),
+            ),
+            Flag(
+                ("--showtemp",),
+                "--showtemp  temperature",
+                "Shows temperature sensors across the GPU die, junction and "
+                "memory, without the rest of the summary table getting in "
+                "the way.",
+            ),
+            Flag(
+                ("--showpids",),
+                "--showpids  processes using the GPU",
+                "Lists which processes currently have the GPU open — the "
+                "ROCm equivalent of nvidia-smi's process list, useful for "
+                "finding what's actually holding VRAM or compute resources.",
+            ),
+        ),
+    ),
+    Command(
+        name="rocminfo",
+        description=(
+            "Queries the ROCm/HSA runtime for every compute agent it can "
+            "see — CPUs and GPUs alike — with their name, compute "
+            "capability (gfx target) and memory pools. The first thing to "
+            "check when a ROCm application can't find the GPU at all: if "
+            "the GPU isn't listed here, nothing built on top of ROCm "
+            "(PyTorch, TensorFlow-ROCm, HIP...) will see it either."
+        ),
+    ),
+    Command(
+        name="glxinfo",
+        description=(
+            "Queries the OpenGL/GLX implementation actually in use: renderer "
+            "name, OpenGL version, and — most importantly — whether direct "
+            "(hardware-accelerated) rendering is enabled. If a desktop app "
+            "or game is unexpectedly slow, 'direct rendering: No' here is "
+            "usually the reason. Works with any GPU vendor via Mesa; part of "
+            "the 'mesa-utils' package on most distros."
+        ),
+        base_args=("-B",),
+    ),
+    Command(
+        name="vulkaninfo",
+        description=(
+            "Queries the Vulkan API implementation and every Vulkan-capable "
+            "device the system can see (GPU or, on some setups, an LLVM "
+            "software fallback) — useful for confirming Vulkan is actually "
+            "wired up to real hardware before blaming an application for a "
+            "rendering problem. Runs full (unsummarized) by default since "
+            "the log pane's own search bar makes digging through the long "
+            "output easy; part of the 'vulkan-tools' package on most "
+            "distros."
+        ),
+        flags=(
+            Flag(
+                ("--summary",),
+                "--summary  brief overview",
+                "Collapses the normally huge device/extension/format dump "
+                "down to just the essentials -- driver version, device "
+                "name and API version per GPU -- for a quick glance instead "
+                "of a wall of text.",
+            ),
+            Flag(
+                ("--show-formats",),
+                "--show-formats  full format support table",
+                "Includes the complete per-format image property table in "
+                "the output, which the default view otherwise abbreviates "
+                "-- needed when checking whether a specific pixel format is "
+                "actually supported.",
+            ),
+            Flag(
+                ("-j",),
+                "-j  JSON output",
+                "Prints device capabilities as machine-readable JSON instead "
+                "of formatted text, for feeding into another tool or "
+                "diffing between two machines.",
+            ),
+        ),
+    ),
+    Command(
+        name="clinfo",
+        description=(
+            "Queries every OpenCL platform and device the system can see "
+            "(AMD via ROCm/Mesa, Intel, NVIDIA, or a CPU runtime) — the "
+            "OpenCL counterpart to glxinfo/vulkaninfo. Useful for confirming "
+            "a GPU is actually exposed to OpenCL before blaming a compute "
+            "application for not finding it."
+        ),
+        flags=(
+            Flag(
+                ("-l",),
+                "-l  short listing",
+                "Lists just platform and device names instead of the full "
+                "capability dump for each one, a quick glance at what's "
+                "available before pulling the full detail on a specific "
+                "device.",
+            ),
+        ),
+    ),
+    Command(
+        name="lspci",
+        description=(
+            "Lists PCI devices, scoped here to display controllers (VGA, 3D "
+            "and other GPU-class devices) with numeric vendor/device IDs and "
+            "the kernel driver currently bound to each one (-k). That last "
+            "part answers the single most common GPU question: is the "
+            "machine actually using the driver you think it is (nvidia vs. "
+            "nouveau, amdgpu vs. radeon, i915...)."
+        ),
+        base_args=("-nnk", "-d", "::03"),
+        flags=(
+            Flag(
+                ("-v",),
+                "-v  verbose",
+                "Adds extra detail per device: memory/IO address ranges, "
+                "IRQ line, and device capabilities — useful when the basic "
+                "listing isn't enough to tell two similar devices apart.",
+            ),
+        ),
+    ),
+    Command(
+        name="journalctl",
+        description=(
+            "The systemd journal, restricted to kernel messages (-k) whose "
+            "text matches common GPU driver names (nvidia, nouveau, amdgpu, "
+            "radeon, i915, or the generic drm subsystem). The fastest way to "
+            "see what the GPU driver itself logged around a crash, mode-set "
+            "failure or hang, without wading through the entire kernel log."
+        ),
+        base_args=("-k", "-g", "nvidia|nouveau|amdgpu|radeon|i915|drm"),
+        requires_sudo=True,
+        flags=(
+            Flag(
+                ("-f",),
+                "-f  follow",
+                "Keep watching for new matching kernel messages as they "
+                "happen, e.g. while reproducing a GPU hang or display glitch "
+                "live.",
+            ),
+            Flag(
+                ("-b",),
+                "-b  current boot",
+                "Shows only matching messages from the current boot, "
+                "skipping older history.",
+            ),
+            Flag(
+                ("-n", "200"),
+                "-n 200  last N lines",
+                "Shows only the most recent N matching entries instead of "
+                "the whole history, a quick snapshot without scrolling "
+                "through everything.",
+                value_index=1,
+                proposed_values=("50", "100", "200", "500"),
+            ),
+            Flag(
+                ("-p", "err"),
+                "-p err  errors and worse",
+                "Filters the matching messages down to the priority level "
+                "you pick and everything more severe, hiding routine driver "
+                "chatter so real failures stand out.",
+                value_index=1,
+                proposed_values=(
+                    "emerg",
+                    "alert",
+                    "crit",
+                    "err",
+                    "warning",
+                    "notice",
+                    "info",
+                    "debug",
+                ),
+            ),
+        ),
+    ),
+    Command(
+        name="radeontop",
+        description=(
+            "Live utilization monitor for AMD GPUs (via the amdgpu/radeon "
+            "kernel driver's performance counters): GPU, memory controller "
+            "and video engine load, refreshed continuously. Run here in "
+            "dump mode (-d -) so it streams plain text instead of grabbing "
+            "the terminal like its default full-screen UI does."
+        ),
+        base_args=("-d", "-"),
+        flags=(
+            Flag(
+                ("-l", "10"),
+                "-l 10  stop after N samples",
+                "Prints exactly N samples and then exits automatically, "
+                "instead of streaming forever — useful for capturing a "
+                "short window without needing to press Ctrl+K.",
+                value_index=1,
+                proposed_values=("5", "10", "20", "50"),
+            ),
+        ),
+    ),
+    Command(
+        name="intel_gpu_top",
+        description=(
+            "Live utilization monitor for Intel integrated/discrete GPUs: "
+            "render/video/blitter engine busy percentages and power usage, "
+            "refreshed continuously. Run here in stdout mode (-o -) so it "
+            "streams plain text instead of grabbing the terminal like its "
+            "default full-screen UI does. Needs root on most systems because "
+            "it reads GPU performance counters through perf."
+        ),
+        base_args=("-o", "-"),
+        requires_sudo=True,
+        flags=(
+            Flag(
+                ("-s", "1000"),
+                "-s 1000  sample interval (ms)",
+                "Sets how often (in milliseconds) a new sample is printed — "
+                "lower values give a smoother live view at the cost of more "
+                "output; higher values are easier to read line by line.",
+                value_index=1,
+                proposed_values=("100", "500", "1000", "2000"),
+            ),
+        ),
+    ),
+]
+
 
 PANELS: list[CommandPanel] = [
     CommandPanel("Logs", LOG_COMMANDS),
     CommandPanel("Network", NETWORK_COMMANDS),
+    CommandPanel("GPU", GPU_COMMANDS),
 ]
