@@ -52,13 +52,18 @@ linuxdebugger
 - **Panels** — commands are grouped into panels: **Logs** (`journalctl`,
   `dmesg`, `tail`, `last`, `who`, `systemctl`, `uptime`, `free`, `df`, `ps`,
   `vmstat`, `lsblk`), **Network** (`ss`, `ip`, `ping`, `tcpdump`, `nmcli`,
-  a NetworkManager-scoped `journalctl`), and **GPU** (`nvidia-smi`,
+  a NetworkManager-scoped `journalctl`), **GPU** (`nvidia-smi`,
   `rocm-smi`, `rocminfo`, `glxinfo`, `vulkaninfo`, `clinfo`, `lspci` scoped
   to display controllers, a GPU-driver-scoped `journalctl`, `radeontop`,
   `intel_gpu_top` — whichever ones apply to the machine's actual GPU vendor
-  simply work, the rest report "command not found"). The tag row above the
-  list shows all panel names,
-  with the active one highlighted, plus the shortcuts to switch: **Ctrl+→**
+  simply work, the rest report "command not found"), and **System Check**
+  (no commands of its own yet — it's a macros-only panel for whole-system
+  analysis, growing one check at a time; see below). The tag row showing
+  all panel names lives in the header, spanning the full terminal width —
+  it used to sit above the command list in the 42-column-wide left pane,
+  but that started visibly overflowing once a fourth, longer panel name
+  joined; the header has room to keep growing. The active panel is
+  highlighted, plus the shortcuts to switch: **Ctrl+→**
   moves to the next panel, **Ctrl+←** moves back (**Alt+C** / **Alt+B** also
   work, but terminals send Alt combos as a bare Escape followed by the
   letter as two separate keystrokes, so if there's any delay between them —
@@ -82,16 +87,75 @@ linuxdebugger
   panel, until you switch panels entirely. Opening a command's flags (→)
   takes over the space where the command
   list (and Macros box, if present) was, the same way it already did
-  before Macros existed. The first macro, **Identify GPU information**,
-  runs a kernel-first decision tree: vendor, model and kernel driver come
-  straight from `/sys/bus/pci/devices` — no package needed at all — and
-  that kernel driver (`nvidia`, `amdgpu`/`radeon`, `i915`/`xe`...) decides
-  which vendor-specific branch runs next (NVIDIA via `/proc/driver/nvidia`
-  and `nvidia-smi`, AMD via the amdgpu VRAM sysfs counter and ROCm's
-  `rocm-smi`/`rocminfo`), plus vendor-agnostic `glxinfo`/`vulkaninfo`
-  checks either way. Every external tool is only invoked after confirming
-  with `shutil.which` that it's actually installed, never assumed; fields
-  that stay undeterminable show as "unknown" rather than a guess.
+  before Macros existed. A macro can have its own configurable options too
+  — an "options →" hint shows next to any macro that does; press → on it
+  to open them (same annex-room treatment as flags). Two kinds: "Show:"
+  toggles pick which output rows to include (all on by default — the
+  checkboxes narrow the result down, the opposite default of a command's
+  flags), and privilege toggles marked `sudo` opt into elevating a specific
+  step, prompting for your password only if one is checked when you run
+  the macro. A macro with a lot of options (like Basic check) clusters them
+  under muted, non-selectable group headers by functionality — arrowing
+  past one skips straight to the next real option instead of landing on
+  it. A macro can also appear indented with a `↳` under the one directly
+  above it in the same panel's Macros box, marking it as that macro's
+  narrower, standalone counterpart rather than an unrelated check — "Basic
+  Firewall Check" under "Basic check" is the only one so far. Every macro
+  is a kernel-first decision tree:
+  sysfs/proc reads come first (no package needed at all), and every
+  external tool after that is only invoked once `shutil.which` confirms
+  it's actually installed — fields that stay undeterminable show as
+  "unknown" rather than a guess. A macro's result renders as whichever of
+  four templates best fits it: a plain label/value list, a semaphore panel
+  (a colored ● per row — plain circle glyphs styled per severity, the same
+  approach as the log pane's severity dot, not colored-circle emoji, which
+  need an emoji font to show any color at all and render double-width
+  without one, breaking alignment in plainer terminals), a pass/fail
+  ladder (with the chain visibly stopping at the first broken rung), or a
+  percentage gauge. A macro can also group its own rows into named
+  sections within that one output — Basic check does this to keep its
+  user/group audit and its firewall check visually distinct despite being
+  one combined run.
+  - **Logs**: **System health check** (semaphore: failed units, errors
+    since boot, load average, root filesystem usage), **Memory pressure
+    check** (gauge: RAM/swap usage from `/proc/meminfo`, plus an OOM-kill
+    search), **Disk space diagnosis** (every real mount's usage *and*
+    inode usage, via `os.statvfs` — no `df` needed), **Boot time report**
+    (`systemd-analyze` breakdown if installed).
+  - **Network**: **Connectivity ladder** (ladder: default route from
+    `/proc/net/route` → gateway ping → internet ping → DNS resolution,
+    each rung skipped once one fails), **DNS check** (semaphore: each
+    configured resolver tested individually), **Listening services
+    summary** (`ss -tulpn` reduced to a port → process table), **Wi-Fi
+    diagnosis** (nmcli device/SSID/signal, or a sysfs fallback).
+  - **GPU**: **Identify GPU information** (fields: vendor/model/driver via
+    sysfs, enriched with `nvidia-smi`/ROCm/`glxinfo`/`vulkaninfo`), **GPU
+    errors & resets check** (semaphore: kernel log searched for the
+    detected vendor's known crash signature), **GPU utilization snapshot**
+    (gauge: GPU/VRAM load, `nvidia-smi` or amdgpu sysfs counters), **Display
+    session check** (Wayland/X11, resolution).
+  - **System Check**: **Basic check** (semaphore: parses /etc/passwd and
+    /etc/group directly for UID-0 accounts and privileged-group membership,
+    plus a best-effort read of /etc/sudoers for explicit per-user grants —
+    reported as "unreadable" rather than skipped when it needs root, unless
+    its "Require sudo for sudoers detail" option is checked — summarizing
+    how many accounts have root access and which ones. It also folds in a
+    firewall check: detects whichever firewall frontend is actually
+    installed — ufw/firewalld/nftables/iptables, checked in that order, so
+    it doesn't assume one distro's tooling — and reports whether its
+    systemd service is active and enabled at boot, both readable without
+    root. The default incoming policy, whether port 80 has basic
+    rate-limiting, and which of the reference ports
+    (SSH/HTTP/HTTPS/IMAP/IMAPS/POP3) are explicitly allowed all need root
+    to read on every backend, so those three rows stay "unknown" unless its
+    separate "Require sudo to read firewall rules" option is checked. 14
+    options in total, each toggling one output row except the two sudo
+    ones; it's read-only throughout — it never enables, configures, or
+    changes firewall policy, only reports what it finds), **Basic Firewall
+    Check** (ladder: the firewall half of Basic check split out on its own,
+    directly below it in the list, with the same detection logic and
+    options, for re-running just that part without the user/group audit).
+    More checks will be added to this panel over time.
 - Commands are shown without flags. Use the arrow keys to navigate the list,
   or just start typing to filter by name — the typed text always shows in
   the bar right above the list (`🔎 type to filter…` when empty). Commands

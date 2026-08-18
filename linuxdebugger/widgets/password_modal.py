@@ -3,11 +3,12 @@ from textual.containers import Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Input, Label, Static
 
-from ..commands import Command
-
 
 class PasswordModal(ModalScreen[str | None]):
-    """Asks for the sudo password (masked) before running a privileged command."""
+    """Asks for the sudo password (masked) before running a privileged
+    command or macro step. `subject_label`/`subject_text` name whatever is
+    about to be elevated (a resolved command line, a macro's name...) --
+    this modal doesn't otherwise care what kind of thing that is."""
 
     DEFAULT_CSS = """
     PasswordModal {
@@ -34,16 +35,21 @@ class PasswordModal(ModalScreen[str | None]):
 
     BINDINGS = [("escape", "cancel", "Cancel")]
 
-    def __init__(self, command: Command, command_line: str, error: str | None = None) -> None:
+    def __init__(
+        self,
+        subject_text: str,
+        subject_label: str = "Command",
+        error: str | None = None,
+    ) -> None:
         super().__init__()
-        self.command = command
-        self.command_line = command_line
+        self.subject_text = subject_text
+        self.subject_label = subject_label
         self.error = error
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Label("⚠ This command requires sudo access", id="title")
-            yield Label(f"Command: {self.command_line}")
+            yield Label("⚠ This requires sudo access", id="title")
+            yield Label(f"{self.subject_label}: {self.subject_text}")
             if self.error:
                 yield Static(self.error, id="error")
             yield Input(placeholder="sudo password", password=True, id="password")

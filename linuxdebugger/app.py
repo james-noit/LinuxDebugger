@@ -11,7 +11,7 @@ from textual.css.query import NoMatches
 from textual.widgets import Footer, ListView
 
 from .commands import PANELS, Command
-from .macros import Macro
+from .macros import Macro, MacroOption
 from .severity import LogEntry, format_dmesg_line, format_journal_line
 from .version import load_version
 from .widgets.command_description import CommandDescription
@@ -30,6 +30,7 @@ from .widgets.log_macro_pane import LogMacroPane
 from .widgets.log_view import LogView
 from .widgets.macro_confirm_modal import MacroConfirmModal
 from .widgets.macro_list import MacroList
+from .widgets.macro_option_list import MacroOptionItem, MacroOptionList
 from .widgets.macro_view import MacroView
 from .widgets.panel_tabs import PanelTabs
 from .widgets.password_modal import PasswordModal
@@ -95,6 +96,7 @@ class LinuxDebuggerApp(App):
         self._worker = None
         self._flag_selections: dict[tuple[str, str], set[int]] = defaultdict(set)
         self._flag_values: dict[tuple[str, str], dict[int, str]] = defaultdict(dict)
+        self._macro_option_selections: dict[tuple[str, str], dict[str, bool]] = defaultdict(dict)
         self._panel_index = 0
         self._current_command_name: str | None = None
         self._show_description = True
@@ -103,7 +105,6 @@ class LinuxDebuggerApp(App):
         yield Header()
         with Horizontal(id="main-row"):
             with Vertical(id="command-pane"):
-                yield PanelTabs(id="panel-tabs")
                 yield FilterBar(id="filter-bar")
                 yield CommandList(
                     self._active_panel.commands,
@@ -141,6 +142,19 @@ class LinuxDebuggerApp(App):
 
     def _values_for(self, command_name: str) -> dict[int, str]:
         return self._flag_values[(self._active_panel.name, command_name)]
+
+    def _macro_options_for(self, macro: Macro) -> dict[str, bool]:
+        state = self._macro_option_selections[(self._active_panel.name, macro.name)]
+        if not state:
+            # First access: seed from each option's own default rather than
+            # starting all-unchecked, since "show this row" options default
+            # to on (narrowing down, not building up).
+            state.update({option.key: option.default for option in macro.options})
+        return state
+
+    def _selected_macro_option_keys(self, macro: Macro) -> frozenset[str]:
+        state = self._macro_options_for(macro)
+        return frozenset(key for key, checked in state.items() if checked)
 
     def _command_line(self, command: Command) -> str:
         values = self._values_for(command.name)
@@ -240,6 +254,13 @@ class LinuxDebuggerApp(App):
                 self.query_one("#flag-description", FlagDescription).show(flag)
             except NoMatches:
                 pass
+        elif isinstance(message.list_view, MacroOptionList):
+            item = message.item
+            option = item.option if isinstance(item, MacroOptionItem) else None
+            try:
+                self.query_one("#macro-option-description", FlagDescription).show(option)
+            except NoMatches:
+                pass
 
     # -- panel switching --------------------------------------------------
 
@@ -254,6 +275,8 @@ class LinuxDebuggerApp(App):
             return
         if self.query("#flags"):
             await self._close_flag_picker()
+        if self.query("#macro-options"):
+            await self._close_macro_options()
 
         self._panel_index = (self._panel_index + direction) % len(PANELS)
         self._update_panel_tabs()
@@ -275,19 +298,24 @@ class LinuxDebuggerApp(App):
     # -- macros -----------------------------------------------------------
 
     async def _sync_macro_list(self) -> None:
-        """Mounts/removes the Macros box so it's only present on panels
-        that actually define macros (currently just GPU)."""
+        """Mounts/removes/replaces the Macros box so it always matches the
+        active panel's own macros -- not just "present or not" (every
+        panel has macros now), but swapped out entirely when switching
+        between two panels that both define macros."""
         try:
             existing = self.query_one("#macros", MacroList)
         except NoMatches:
             existing = None
 
         macros = self._active_panel.macros
-        if macros and existing is None:
+        if existing is not None and existing.macros == macros:
+            return
+
+        if existing is not None:
+            await existing.remove()
+        if macros:
             pane = self.query_one("#command-pane", Vertical)
             await pane.mount(MacroList(macros, id="macros"), before=self.command_description)
-        elif not macros and existing is not None:
-            await existing.remove()
 
     def on_macro_list_run_macro(self, message: MacroList.RunMacro) -> None:
         self.run_worker(self._confirm_and_run_macro(message.macro), exclusive=False)
@@ -296,9 +324,21 @@ class LinuxDebuggerApp(App):
         confirmed = await self.push_screen_wait(MacroConfirmModal(macro))
         if not confirmed:
             return
-        self._worker = self.run_worker(self._run_macro(macro), exclusive=True)
 
-    async def _run_macro(self, macro: Macro) -> None:
+        selected = self._selected_macro_option_keys(macro)
+        password: str | None = None
+        if any(option.requires_sudo for option in macro.options if option.key in selected):
+            password = await self.push_screen_wait(
+                PasswordModal(macro.name, subject_label="Macro")
+            )
+            if password is None:
+                return
+
+        self._worker = self.run_worker(self._run_macro(macro, selected, password), exclusive=True)
+
+    async def _run_macro(
+        self, macro: Macro, selected: frozenset[str], password: str | None
+    ) -> None:
         pane = self.log_macro_pane
         log_view = pane.log_view
         macro_view = pane.macro_view
@@ -314,10 +354,66 @@ class LinuxDebuggerApp(App):
         pane.show_macro()
 
         self.sub_title = f"running macro: {macro.name}"
-        run = await macro.run()
+        run = await (macro.run(selected, password) if macro.options else macro.run())
         log_view.append_text(run.raw_log)
-        macro_view.show(run.result.title, run.result.fields)
+        macro_view.show(run.result)
         self.sub_title = "log monitor"
+
+    # -- macro options ----------------------------------------------------
+
+    async def on_macro_list_open_options(self, message: MacroList.OpenOptions) -> None:
+        macro = message.macro
+        selections = self._macro_options_for(macro)
+
+        # Same annex-room treatment as a command's flags: options replace
+        # both Commands and Macros rather than squeezing in below them.
+        self.command_list.display = False
+        try:
+            self.query_one("#macros", MacroList).display = False
+        except NoMatches:
+            pass
+
+        pane = self.query_one("#command-pane", Vertical)
+        option_list = MacroOptionList(macro, selections, id="macro-options")
+        await pane.mount(option_list, before=self.command_description)
+        option_description = FlagDescription(id="macro-option-description")
+        await pane.mount(option_description)
+        option_description.display = self._show_description
+
+        option_list.focus()
+
+    def on_macro_option_list_option_toggled(
+        self, message: MacroOptionList.OptionToggled
+    ) -> None:
+        # Selections are stored by key in a plain dict already mutated by
+        # the widget itself; nothing else currently mirrors that state
+        # (macro list rows don't show a per-option summary the way a
+        # command's flags hint does), so there's nothing further to do here
+        # beyond letting the message exist for future use.
+        pass
+
+    async def on_macro_option_list_closed(self, message: MacroOptionList.Closed) -> None:
+        await self._close_macro_options()
+
+    async def _close_macro_options(self) -> None:
+        try:
+            await self.query_one("#macro-options", MacroOptionList).remove()
+        except NoMatches:
+            pass
+        try:
+            await self.query_one("#macro-option-description", FlagDescription).remove()
+        except NoMatches:
+            pass
+
+        self.command_list.display = True
+        try:
+            self.query_one("#macros", MacroList).display = True
+        except NoMatches:
+            pass
+        try:
+            self.query_one("#macros", MacroList).focus()
+        except NoMatches:
+            self.command_list.focus()
 
     def _restore_log_view(self) -> None:
         # Switches the view back to the raw log without discarding a macro
@@ -427,7 +523,7 @@ class LinuxDebuggerApp(App):
         password = None
         if command.requires_sudo:
             password = await self.push_screen_wait(
-                PasswordModal(command, self._command_line(command))
+                PasswordModal(self._command_line(command))
             )
             if password is None:
                 return

@@ -1,6 +1,6 @@
 from dataclasses import dataclass, field
 
-from .macros import GPU_MACROS, Macro
+from .macros import GPU_MACROS, LOG_MACROS, NETWORK_MACROS, SYSTEM_CHECK_MACROS, Macro
 
 
 @dataclass(frozen=True)
@@ -1108,8 +1108,11 @@ GPU_COMMANDS: list[Command] = [
 ]
 
 
+SYSTEM_CHECK_COMMANDS: list[Command] = []
+
 PANELS: list[CommandPanel] = [
-    CommandPanel("Logs", LOG_COMMANDS),
-    CommandPanel("Network", NETWORK_COMMANDS),
+    CommandPanel("Logs", LOG_COMMANDS, macros=LOG_MACROS),
+    CommandPanel("Network", NETWORK_COMMANDS, macros=NETWORK_MACROS),
     CommandPanel("GPU", GPU_COMMANDS, macros=GPU_MACROS),
+    CommandPanel("System Check", SYSTEM_CHECK_COMMANDS, macros=SYSTEM_CHECK_MACROS),
 ]
