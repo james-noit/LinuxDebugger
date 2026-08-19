@@ -2,20 +2,24 @@ import asyncio
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterable
 
-from textual.app import App, ComposeResult
+from textual.app import App, ComposeResult, SystemCommand
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.css.query import NoMatches
+from textual.screen import Screen
 from textual.widgets import Footer, ListView
 
 from .commands import PANELS, Command
 from .macros import Macro, MacroOption
+from .settings import DEFAULT_KEYBINDINGS, Settings, load_settings, save_settings
 from .severity import LogEntry, format_dmesg_line, format_journal_line
 from .version import load_version
 from .widgets.command_description import CommandDescription
 from .widgets.command_list import CommandItem, CommandList
+from .widgets.console import Console, Terminal
+from .widgets.console_position_modal import ConsolePositionModal
 from .widgets.filter_bar import FilterBar
 from .widgets.flag_description import FlagDescription
 from .widgets.flag_list import FlagItem, FlagList
@@ -100,6 +104,8 @@ class LinuxDebuggerApp(App):
         self._panel_index = 0
         self._current_command_name: str | None = None
         self._show_description = True
+        self._settings: Settings = load_settings()
+        self._console_open = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -128,6 +134,19 @@ class LinuxDebuggerApp(App):
         self._update_panel_tabs()
         self.log_macro_pane.set_macro_available(False)
         self.run_worker(self._sync_macro_list(), exclusive=False)
+        self._bind_console_key()
+
+    def _bind_console_key(self) -> None:
+        # A dynamic bind() rather than a static BINDINGS entry -- the key
+        # is user-configurable (settings.keybindings), so it isn't known
+        # until settings.json has been read. refresh_bindings() prompts
+        # the Footer to redraw so the (possibly reconfigured) key shows up
+        # there immediately rather than after the next keypress.
+        self.bind(self._console_toggle_key(), "toggle_console", description="Console")
+        self.refresh_bindings()
+
+    def _console_toggle_key(self) -> str:
+        return self._settings.keybindings.get("toggle_console", DEFAULT_KEYBINDINGS["toggle_console"])
 
     @property
     def _active_panel(self):
@@ -656,6 +675,111 @@ class LinuxDebuggerApp(App):
             return
 
         self.notify(f"Exported {len(lines)} lines to {path}", title="Export complete")
+
+    # -- console ------------------------------------------------------------
+
+    def get_system_commands(self, screen: Screen) -> Iterable[SystemCommand]:
+        yield from super().get_system_commands(screen)
+
+        yield SystemCommand(
+            "Close console" if self._console_open else "Open console",
+            f"{'Hide' if self._console_open else 'Show'} the ad-hoc shell console "
+            f"(shortcut: {self._console_toggle_key()})",
+            self.action_toggle_console,
+        )
+        if self._settings.console_position != "bottom":
+            yield SystemCommand(
+                "Console position: Bottom",
+                "Move the console to the bottom of the screen",
+                lambda: self.run_worker(self._set_console_position("bottom"), exclusive=False),
+            )
+        if self._settings.console_position != "right":
+            yield SystemCommand(
+                "Console position: Right",
+                "Move the console to the right of the screen",
+                lambda: self.run_worker(self._set_console_position("right"), exclusive=False),
+            )
+
+    def action_toggle_console(self) -> None:
+        self.run_worker(self._toggle_console(), exclusive=False)
+
+    def on_terminal_exited(self, message: Terminal.Exited) -> None:
+        # The shell process ended on its own (`exit`, Ctrl+D, ...) -- a
+        # frozen dead terminal sitting there has no further use, so drop
+        # the whole widget rather than just hiding it. The next open then
+        # takes the "no console yet" branch below and spawns a fresh
+        # shell instead of reusing the dead one.
+        self.run_worker(self._close_console(remove=True), exclusive=False)
+
+    async def _toggle_console(self) -> None:
+        if self._console_open:
+            await self._close_console()
+        else:
+            await self._open_console()
+
+    async def _open_console(self) -> None:
+        if self._settings.console_position is None:
+            position = await self.push_screen_wait(ConsolePositionModal())
+            if position is None:
+                return
+            self._settings.console_position = position
+            save_settings(self._settings)
+
+        console = self._console_widget()
+        if console is None:
+            console = Console(id="console", reserved_key=self._console_toggle_key())
+            console.add_class(f"-position-{self._settings.console_position}")
+            if self._settings.console_position == "right":
+                await self.query_one("#main-row", Horizontal).mount(console)
+            else:
+                await self.screen.mount(console, before=self.query_one(Footer))
+        else:
+            console.display = True
+        console.focus_input()
+        self._console_open = True
+
+    async def _close_console(self, *, remove: bool = False) -> None:
+        console = self._console_widget()
+        if console is not None:
+            if remove:
+                await console.remove()
+            else:
+                console.display = False
+        self._console_open = False
+        try:
+            self.command_list.focus()
+        except NoMatches:
+            pass
+
+    async def _set_console_position(self, position: str) -> None:
+        if position == self._settings.console_position:
+            return
+        self._settings.console_position = position
+        save_settings(self._settings)
+
+        console = self._console_widget()
+        if console is None:
+            return
+        # Moving between #main-row (a Horizontal, for "right") and the
+        # screen itself (for "bottom") needs a remount, not just a CSS
+        # class swap -- a widget's layout parent can't change in place.
+        was_open = console.display
+        await console.remove()
+        console = Console(id="console", reserved_key=self._console_toggle_key())
+        console.add_class(f"-position-{position}")
+        if position == "right":
+            await self.query_one("#main-row", Horizontal).mount(console)
+        else:
+            await self.screen.mount(console, before=self.query_one(Footer))
+        console.display = was_open
+        if was_open:
+            console.focus_input()
+
+    def _console_widget(self) -> Console | None:
+        try:
+            return self.query_one("#console", Console)
+        except NoMatches:
+            return None
 
 
 def run() -> None:

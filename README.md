@@ -238,6 +238,42 @@ linuxdebugger
   is selected, since arrow keys are busy moving the cursor in the path
   field). Defaults to the filtered scope when a filter is active.
 - `Ctrl+Q` — quit.
+- **Console** (`F9` by default) — toggles a real terminal, independent of the
+  curated Commands/Flags/Macros system, for running whatever one-off command
+  they don't cover. It's not a captured-output command runner; it spawns the
+  user's actual login shell (`$SHELL`) attached to a real pseudo-terminal, so
+  everything a normal terminal gives it comes for free: the shell's own
+  prompt (user, host, current directory, colors — whatever its own config
+  already renders), ordinary commands' color output (which most tools only
+  emit when talking to a real tty), and genuine interactivity for anything
+  that needs a controlling terminal — `sudo` prompts for its password in
+  place exactly like a normal terminal, `systemctl edit` can invoke
+  `$EDITOR`, `less`/`vim`/`top` all work. A [pyte](https://github.com/selectel/pyte)
+  virtual screen decodes the shell's output, so its escape sequences (a bare
+  `clear` included) only ever repaint that virtual screen — they can't leak
+  through and corrupt the real terminal Textual itself is drawing to. Every
+  key is forwarded straight to the shell (arrows, Ctrl+C, Ctrl+K/Ctrl+W
+  readline editing, Escape inside vim, all of it) with one deliberate
+  exception: whatever key opens the console also closes it, even while it's
+  focused, so there's always a way out. Opening it focuses it immediately —
+  no extra click or Tab needed before typing. Exiting the shell itself
+  (`exit`, Ctrl+D, the shell crashing) closes the console the same way that
+  key would; reopening it after that starts a brand new shell rather than
+  showing the dead one. First time you open it, it asks
+  whether it should live at the **bottom** or the **right** of the screen;
+  that choice is saved to `~/.config/linuxdebugger/settings.json` (or under
+  `$XDG_CONFIG_HOME` if set) and reused every time after, though it can be
+  changed anytime from the command palette (`Ctrl+P` → "Console position:
+  Bottom"/"Right"). The same palette also lists "Open console"/"Close
+  console" showing whatever its shortcut currently is. That shortcut is
+  configurable too — edit `"keybindings": {"toggle_console": "..."}` in the
+  same settings file using
+  [Textual's key names](https://textual.textualize.io/guide/input/#key-names)
+  (e.g. `"ctrl+alt+space"`), then restart the app. `F9` is the shipped
+  default rather than a `Ctrl+Alt+`-style chord because, like the `Alt+C`/
+  `Alt+B` panel shortcuts above, some terminals don't deliver modifier-heavy
+  combinations as a single atomic sequence — function keys don't have that
+  problem.
 
 ## Version
 
