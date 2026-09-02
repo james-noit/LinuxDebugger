@@ -90,8 +90,13 @@ fi
 
 # -- step 1: the sense-hat Python package (via uv) -------------------------
 
-check_sense_hat_module() {
-    "$VENV_PYTHON" -c "import sense_hat" >/dev/null 2>&1
+check_sense_hat_installed() {
+    # Checks install metadata rather than `import sense_hat` -- importing
+    # it talks to the I2C bus immediately, which isn't enabled yet at this
+    # point (that happens in the system-configuration step below), so an
+    # import-based check would misreport a correctly-installed package as
+    # missing on a freshly-flashed Pi.
+    "$VENV_PYTHON" -m pip show sense-hat >/dev/null 2>&1
 }
 
 ensure_uv() {
@@ -131,7 +136,7 @@ install_sense_hat_package() {
 }
 
 run_package_check() {
-    if check_sense_hat_module; then
+    if check_sense_hat_installed; then
         ok "sense-hat Python package already installed"
         return 0
     fi
@@ -141,7 +146,7 @@ run_package_check() {
         exit 1
     fi
     install_sense_hat_package
-    check_sense_hat_module || { err "sense-hat still not importable after install."; exit 1; }
+    check_sense_hat_installed || { err "sense-hat still not installed after install attempt."; exit 1; }
     ok "sense-hat Python package installed"
 }
 
@@ -240,11 +245,13 @@ run_final_check() {
         return 0
     fi
     info "Verifying the Sense HAT is reachable..."
-    if "$VENV_PYTHON" -c "from sense_hat import SenseHat; SenseHat().get_temperature()" >/dev/null 2>&1; then
+    local error_output
+    if error_output="$("$VENV_PYTHON" -c "from sense_hat import SenseHat; SenseHat().get_temperature()" 2>&1 >/dev/null)"; then
         ok "Sense HAT detected and responding"
     else
-        warn "Could not read from the Sense HAT."
-        warn "Check it's seated correctly on the GPIO header, then re-run this script."
+        warn "Could not read from the Sense HAT. Check it's seated correctly on the GPIO header."
+        warn "Underlying error:"
+        printf '%s\n' "$error_output" | sed 's/^/    /'
     fi
 }
 
@@ -264,6 +271,11 @@ main() {
     box "3. Verification"
     run_final_check
     echo
+
+    case ":$PATH:" in
+        *":$HOME/.local/bin:"*) ;;
+        *) warn "$HOME/.local/bin is not on your PATH -- add 'export PATH=\"\$HOME/.local/bin:\$PATH\"' to your shell rc file to use 'uv' directly outside this script." ;;
+    esac
 
     ok "Sense HAT setup finished. Launch Linux Debugger and look for the 'Sensor HAT' panel."
 }
