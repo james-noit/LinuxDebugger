@@ -275,6 +275,44 @@ linuxdebugger
   combinations as a single atomic sequence — function keys don't have that
   problem.
 
+## Plugins
+
+Linux Debugger has a small plugin mechanism that lets a panel be
+contributed by a self-contained module instead of being hardcoded — see
+`linuxdebugger/plugins/`. A plugin can report itself unavailable (e.g.
+required hardware isn't present) without breaking the app; unavailable
+plugins simply don't add a panel.
+
+### Sensor HAT panel
+
+The built-in Sense HAT plugin shows a live-updating "Sensor HAT" panel
+with temperature, humidity, pressure, and IMU (accelerometer/gyroscope/
+magnetometer) readings from a Raspberry Pi Sense HAT, rendered as the
+same block-character gauges used elsewhere in the app. It only appears
+when the `sense-hat` Python package is installed and the HAT is actually
+reachable — on any other machine, the panel is silently absent.
+
+To set it up on a Raspberry Pi (after `./installer.sh`):
+
+```bash
+./setup-sense-hat.sh
+```
+
+This is an interactive stepper that:
+
+1. Checks whether the `sense-hat` Python package is installed in the
+   app's virtual environment, and if not, offers to install it — using
+   [`uv`](https://docs.astral.sh/uv/) (installing `uv` itself first, with
+   permission, if it isn't already on the system).
+2. Checks whether the Pi's I2C interface is enabled and whether your user
+   is in the `i2c` group, offering to fix either (via `raspi-config`/
+   `usermod`, both requiring `sudo`) with your permission before making
+   any change.
+3. Verifies the Sense HAT actually responds, or tells you a reboot is
+   needed first.
+
+Run `./setup-sense-hat.sh --yes` to accept every prompt automatically.
+
 ## Version
 
 The app version is read from the [VERSION](VERSION) file at startup, exposed
