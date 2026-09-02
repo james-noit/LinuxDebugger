@@ -2,7 +2,8 @@
 # Sense HAT plugin setup for Linux Debugger.
 #
 # Checks for (and, with permission, installs/configures) everything the
-# "Sensor HAT" panel needs: the `sense-hat` Python package (via uv) and the
+# "Sensor HAT" panel needs: the `sense-hat` Python package (via uv), the
+# system `RTIMU` library it depends on (apt-only, not on PyPI), and the
 # Raspberry Pi's I2C bus being enabled and accessible.
 #
 # Usage:
@@ -150,6 +151,55 @@ run_package_check() {
     ok "sense-hat Python package installed"
 }
 
+# -- step 1b: RTIMU (the orientation-sensor library the pip package needs) --
+#
+# The sense-hat wheel on PyPI imports `RTIMU`, a compiled binding to
+# RTIMULib2 that Raspberry Pi never published on PyPI -- it only ships as
+# part of the `sense-hat` apt package, installed into the *system* Python.
+# A plain `python3 -m venv` doesn't see system packages by default, so once
+# the apt package is in, this also flips the venv's own
+# `include-system-site-packages` flag (a one-line pyvenv.cfg edit, no need
+# to recreate the venv) so the venv's Python can import it too.
+
+check_rtimu_installed() {
+    python3 -c "import RTIMU" >/dev/null 2>&1
+}
+
+check_venv_sees_system_packages() {
+    grep -qE '^include-system-site-packages\s*=\s*true' "$VENV_DIR/pyvenv.cfg" 2>/dev/null
+}
+
+enable_venv_system_site_packages() {
+    sed -i 's/^include-system-site-packages\s*=\s*false/include-system-site-packages = true/' \
+        "$VENV_DIR/pyvenv.cfg"
+}
+
+run_rtimu_check() {
+    if ! check_rtimu_installed; then
+        warn "RTIMU (the Sense HAT's orientation-sensor library) is not installed system-wide."
+        if ! ask_yes_no "Install the 'sense-hat' apt package now (requires sudo)?" y; then
+            err "Cannot continue without RTIMU -- the Sense HAT panel needs it."
+            exit 1
+        fi
+        require_sudo_or_exit "installing the sense-hat apt package"
+        info "Installing the sense-hat apt package"
+        $SUDO apt-get update -y && $SUDO apt-get install -y sense-hat
+        check_rtimu_installed || { err "RTIMU still not importable by system python3 after apt install."; exit 1; }
+        ok "RTIMU installed"
+    else
+        ok "RTIMU is installed system-wide"
+    fi
+
+    if check_venv_sees_system_packages; then
+        ok "The virtual environment can already see system-wide packages"
+        return 0
+    fi
+    info "Allowing the virtual environment to see system-wide packages (needed for RTIMU)"
+    enable_venv_system_site_packages
+    check_venv_sees_system_packages || { err "Failed to update $VENV_DIR/pyvenv.cfg"; exit 1; }
+    ok "Virtual environment updated"
+}
+
 # -- step 2: system configuration (I2C) ------------------------------------
 
 find_boot_config() {
@@ -263,12 +313,16 @@ main() {
     run_package_check
     echo
 
-    box "2. System configuration"
+    box "2. RTIMU library"
+    run_rtimu_check
+    echo
+
+    box "3. System configuration"
     run_i2c_config_check
     run_group_check
     echo
 
-    box "3. Verification"
+    box "4. Verification"
     run_final_check
     echo
 

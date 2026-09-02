@@ -304,11 +304,16 @@ This is an interactive stepper that:
    app's virtual environment, and if not, offers to install it — using
    [`uv`](https://docs.astral.sh/uv/) (installing `uv` itself first, with
    permission, if it isn't already on the system).
-2. Checks whether the Pi's I2C interface is enabled and whether your user
+2. Checks whether `RTIMU` (the orientation-sensor library the pip package
+   needs, only ever distributed as part of Raspberry Pi OS's `sense-hat`
+   apt package, never on PyPI) is installed system-wide, offering to
+   `sudo apt install sense-hat` if not, then lets the virtual environment
+   see it by flipping `include-system-site-packages` in its `pyvenv.cfg`.
+3. Checks whether the Pi's I2C interface is enabled and whether your user
    is in the `i2c` group, offering to fix either (via `raspi-config`/
    `usermod`, both requiring `sudo`) with your permission before making
    any change.
-3. Verifies the Sense HAT actually responds, or tells you a reboot is
+4. Verifies the Sense HAT actually responds, or tells you a reboot is
    needed first.
 
 Run `./setup-sense-hat.sh --yes` to accept every prompt automatically.
