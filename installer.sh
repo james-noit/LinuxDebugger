@@ -235,7 +235,7 @@ WRAPPER
 }
 
 ensure_path() {
-    local dir="$1"
+    local dir="$1" interactive="${2:-0}"
     case ":$PATH:" in
         *":$dir:"*) ok "$dir is already on your PATH"; return 0 ;;
     esac
@@ -251,11 +251,17 @@ ensure_path() {
     local line="export PATH=\"$dir:\$PATH\""
     if [ -f "$rc" ] && grep -qF "$line" "$rc" 2>/dev/null; then
         info "PATH entry already present in $rc"
-    else
-        printf '\n# Added by the Linux Debugger installer\n%s\n' "$line" >> "$rc"
-        ok "Added $dir to PATH in $rc"
-        warn "Restart your shell (or run: source $rc) before using the command."
+        return 0
     fi
+
+    if [ "$interactive" = "1" ] && ! ask_yes_no "Add $dir to your PATH in $rc?" y; then
+        warn "Skipping -- add it yourself later to use the launcher command directly."
+        return 0
+    fi
+
+    printf '\n# Added by the Linux Debugger installer\n%s\n' "$line" >> "$rc"
+    ok "Added $dir to PATH in $rc"
+    warn "Restart your shell (or run: source $rc) before using the command."
 }
 
 # -- modes --------------------------------------------------------------
@@ -267,7 +273,7 @@ run_auto() {
     ensure_venv
     install_app
     create_wrapper "$DEFAULT_COMMAND_NAME" "$DEFAULT_INSTALL_DIR"
-    ensure_path "$DEFAULT_INSTALL_DIR"
+    ensure_path "$DEFAULT_INSTALL_DIR" 0
     echo
     ok "Installation complete. Run '${DEFAULT_COMMAND_NAME}' to start Linux Debugger."
 }
@@ -286,7 +292,7 @@ run_manual() {
     install_dir="$(ask_value "Directory to install the launcher in" "$DEFAULT_INSTALL_DIR")"
     echo
     create_wrapper "$command_name" "$install_dir"
-    ensure_path "$install_dir"
+    ensure_path "$install_dir" 1
     echo
     ok "Installation complete. Run '${command_name}' to start Linux Debugger."
 }

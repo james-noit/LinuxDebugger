@@ -19,10 +19,12 @@ Either mode: detects your distro's package manager (`apt`, `dnf`, `yum`,
 `pacman`, `zypper`, `apk`) and installs any missing dependencies
 (`python3`, the `venv` module, `pip`, and — best-effort — a clipboard tool
 like `xclip`), creates the project's virtual environment and installs the
-app into it, then adds a launcher command to your `PATH` (`debug` by
-default; the manual mode lets you choose a different name and location).
-Run `./installer.sh --auto` or `./installer.sh --manual` to skip the initial
-prompt.
+app into it, then adds a launcher command to your `PATH` if it isn't
+already there (`debug` in `~/.local/bin` by default; manual mode lets you
+choose a different name and location, and asks before touching your shell
+rc file — auto mode does it without asking, per its "sensible defaults"
+philosophy). Run `./installer.sh --auto` or `./installer.sh --manual` to
+skip the initial prompt.
 
 Once installed, just run:
 
@@ -31,6 +33,23 @@ debug
 ```
 
 (or whatever command name you chose in manual mode).
+
+## Uninstall
+
+```bash
+./uninstall.sh
+```
+
+Interactively removes what `installer.sh` added: the launcher command
+(auto-detected by scanning common bin directories for a wrapper pointing
+at this project's virtual environment, so it finds it even if you chose a
+custom name/location in manual mode), the PATH entry added to your shell
+rc file, and the virtual environment — asking before each removal.
+Saved settings (`~/.config/linuxdebugger/`) are left in place unless you
+say otherwise, since they're your preferences, not part of the install.
+The source directory itself is never touched — remove it yourself if you
+want it gone too. Run `./uninstall.sh --yes` to accept every default
+(keeps settings, removes everything else) without prompting.
 
 ## Run without installing
 
