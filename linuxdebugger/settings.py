@@ -25,12 +25,24 @@ def settings_path() -> Path:
     return base / "linuxdebugger" / "settings.json"
 
 
+# The Sense HAT's temperature sensors sit directly on the HAT PCB, right
+# above the Pi's SoC, so they read board temperature rather than ambient --
+# commonly 5-15C high. `corrected = raw - ((cpu_temp - raw) / factor)` is
+# the community-derived correction; 5.466 is a commonly cited average
+# factor, but it varies with case/airflow, hence configurable rather than
+# hardcoded.
+DEFAULT_SENSE_HAT_TEMP_CALIBRATION_FACTOR = 5.466
+DEFAULT_SENSE_HAT_REFRESH_INTERVAL = 1.0
+
+
 @dataclass
 class Settings:
     # None until the console is opened for the first time and the user is
     # asked; "bottom" or "right" after that.
     console_position: str | None = None
     keybindings: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_KEYBINDINGS))
+    sense_hat_temp_calibration_factor: float = DEFAULT_SENSE_HAT_TEMP_CALIBRATION_FACTOR
+    sense_hat_refresh_interval: float = DEFAULT_SENSE_HAT_REFRESH_INTERVAL
 
 
 def load_settings() -> Settings:
@@ -48,7 +60,20 @@ def load_settings() -> Settings:
     if console_position not in ("bottom", "right"):
         console_position = None
 
-    return Settings(console_position=console_position, keybindings=keybindings)
+    def _positive_float(key: str, default: float) -> float:
+        value = raw.get(key)
+        return value if isinstance(value, (int, float)) and value > 0 else default
+
+    return Settings(
+        console_position=console_position,
+        keybindings=keybindings,
+        sense_hat_temp_calibration_factor=_positive_float(
+            "sense_hat_temp_calibration_factor", DEFAULT_SENSE_HAT_TEMP_CALIBRATION_FACTOR
+        ),
+        sense_hat_refresh_interval=_positive_float(
+            "sense_hat_refresh_interval", DEFAULT_SENSE_HAT_REFRESH_INTERVAL
+        ),
+    )
 
 
 def save_settings(settings: Settings) -> None:

@@ -285,12 +285,33 @@ plugins simply don't add a panel.
 
 ### Sensor HAT panel
 
-The built-in Sense HAT plugin shows a live-updating "Sensor HAT" panel
-with temperature, humidity, pressure, and IMU (accelerometer/gyroscope/
-magnetometer) readings from a Raspberry Pi Sense HAT, rendered as the
-same block-character gauges used elsewhere in the app. It only appears
-when the `sense-hat` Python package is installed and the HAT is actually
-reachable — on any other machine, the panel is silently absent.
+The built-in Sense HAT plugin shows a live-updating "Sensor HAT" panel for
+a Raspberry Pi Sense HAT, rendered as the same block-character gauges
+used elsewhere in the app. It only appears when the `sense-hat` Python
+package is installed and the HAT is actually reachable — on any other
+machine, the panel is silently absent.
+
+- **Environment** — temperature, humidity, and pressure, each shown with
+  a 60-sample sparkline trend and colored by how far the reading is from
+  a normal indoor range. Temperature is corrected for the Sense HAT's
+  well-known CPU-heat bias (its sensor sits right above the Pi's SoC and
+  reads several degrees high as a result) using the Pi's own CPU
+  temperature; both the corrected and raw value are shown side by side.
+  The correction factor (`sense_hat_temp_calibration_factor`, default
+  `5.466`) and refresh interval (`sense_hat_refresh_interval`, default
+  `1.0` seconds) are both tunable in
+  `~/.config/linuxdebugger/settings.json` — the default correction factor
+  is a rough community average, so calibrate it against a real
+  thermometer for an accurate reading on your specific Pi/case.
+- **Orientation** — fused pitch/roll/yaw (sensor-fusion of the
+  accelerometer, gyroscope, and magnetometer, far steadier to read than
+  the three raw axes it's derived from) plus a compass heading shown
+  both in degrees and as an 8-point direction arrow.
+- **LED matrix** — while the panel is focused, `t` displays a test
+  pattern on the physical 8×8 LED matrix, `c` clears it, and `m` scrolls
+  the current corrected temperature across it.
+- **Joystick** — while the panel is focused, pressing the physical
+  joystick left/right switches panels the same way Ctrl+Left/Right does.
 
 To set it up on a Raspberry Pi (after `./installer.sh`):
 

@@ -39,6 +39,7 @@ from .widgets.macro_option_list import MacroOptionItem, MacroOptionList
 from .widgets.macro_view import MacroView
 from .widgets.panel_tabs import PanelTabs
 from .widgets.password_modal import PasswordModal
+from .widgets.sense_hat_view import SenseHatView
 from .widgets.severity_filter import SeverityFilter
 from .widgets.time_range_filter import TimeRangeFilter
 
@@ -201,6 +202,9 @@ class LinuxDebuggerApp(App):
     def on_log_view_open_entry(self, message: LogView.OpenEntry) -> None:
         self.push_screen(LogEntryModal(message.text))
 
+    def on_sense_hat_view_navigate_panel(self, message: SenseHatView.NavigatePanel) -> None:
+        self.run_worker(self._switch_panel(message.direction), exclusive=False)
+
     def on_severity_filter_changed(self, message: SeverityFilter.Changed) -> None:
         self._apply_log_filters()
 
@@ -314,7 +318,12 @@ class LinuxDebuggerApp(App):
         command_list = self.command_list
         await command_list.set_commands(self._active_panel.commands)
         await self._sync_macro_list()
-        command_list.focus()
+        # A content_factory panel's whole UI is its custom widget --
+        # show_custom() above already focused it, so focusing the (empty)
+        # CommandList here would just steal that focus right back and
+        # silently swallow the widget's own key bindings.
+        if content_factory is None:
+            command_list.focus()
 
         item = command_list.highlighted_child
         command = item.command if isinstance(item, CommandItem) else None
