@@ -1,4 +1,7 @@
 from dataclasses import dataclass, field
+from typing import Callable
+
+from textual.widget import Widget
 
 from .macros import GPU_MACROS, LOG_MACROS, NETWORK_MACROS, SYSTEM_CHECK_MACROS, Macro
 
@@ -61,6 +64,10 @@ class CommandPanel:
     name: str
     commands: list[Command]
     macros: list[Macro] = field(default_factory=list)
+    # Set by plugin-contributed panels whose whole UI is a custom
+    # live-updating widget (e.g. a sensor dashboard) rather than the
+    # command/macro list -- see LogMacroPane.show_custom().
+    content_factory: Callable[[], Widget] | None = None
 
 
 LOG_COMMANDS: list[Command] = [

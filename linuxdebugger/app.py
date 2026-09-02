@@ -11,8 +11,9 @@ from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.widgets import Footer, ListView
 
-from .commands import PANELS, Command
+from .commands import PANELS as BUILT_IN_PANELS, Command
 from .macros import Macro, MacroOption
+from .plugins import PLUGIN_CLASSES, discover_plugin_panels
 from .settings import DEFAULT_KEYBINDINGS, Settings, load_settings, save_settings
 from .severity import LogEntry, format_dmesg_line, format_journal_line
 from .version import load_version
@@ -106,6 +107,7 @@ class LinuxDebuggerApp(App):
         self._show_description = True
         self._settings: Settings = load_settings()
         self._console_open = False
+        self._panels = BUILT_IN_PANELS + discover_plugin_panels(PLUGIN_CLASSES)
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -150,7 +152,7 @@ class LinuxDebuggerApp(App):
 
     @property
     def _active_panel(self):
-        return PANELS[self._panel_index]
+        return self._panels[self._panel_index]
 
     @property
     def log_macro_pane(self) -> LogMacroPane:
@@ -242,7 +244,7 @@ class LinuxDebuggerApp(App):
 
     def _update_panel_tabs(self) -> None:
         self.query_one("#panel-tabs", PanelTabs).show(
-            [panel.name for panel in PANELS], self._panel_index
+            [panel.name for panel in self._panels], self._panel_index
         )
 
     @property
@@ -290,18 +292,24 @@ class LinuxDebuggerApp(App):
         self.run_worker(self._switch_panel(-1), exclusive=False)
 
     async def _switch_panel(self, direction: int) -> None:
-        if len(PANELS) < 2:
+        if len(self._panels) < 2:
             return
         if self.query("#flags"):
             await self._close_flag_picker()
         if self.query("#macro-options"):
             await self._close_macro_options()
 
-        self._panel_index = (self._panel_index + direction) % len(PANELS)
+        self._panel_index = (self._panel_index + direction) % len(self._panels)
         self._update_panel_tabs()
         # Leaving the panel invalidates any macro result shown for it, so
         # the toggle goes away entirely here (not just a view switch).
         self.log_macro_pane.set_macro_available(False)
+
+        content_factory = self._active_panel.content_factory
+        if content_factory is not None:
+            await self.log_macro_pane.show_custom(content_factory)
+        else:
+            await self.log_macro_pane.clear_custom()
 
         command_list = self.command_list
         await command_list.set_commands(self._active_panel.commands)

@@ -1,5 +1,8 @@
+from typing import Callable
+
 from textual import events
-from textual.containers import Vertical
+from textual.containers import Container, Vertical
+from textual.widget import Widget
 from textual.widgets import Static
 
 from .log_view import LogView
@@ -49,11 +52,14 @@ class LogMacroPane(Vertical):
         self.tabs.display = False
         self._macro_available = False
         self._showing_macro = False
+        self._custom_slot = Container(id="custom-slot")
+        self._custom_slot.display = False
 
     def compose(self):
         yield self.tabs
         yield self.log_view
         yield self.macro_view
+        yield self._custom_slot
 
     def set_macro_available(self, available: bool) -> None:
         self._macro_available = available
@@ -82,6 +88,28 @@ class LogMacroPane(Vertical):
         self.macro_view.focus()
         self.log_view.display = False
         self._update_tabs()
+
+    async def show_custom(self, factory: Callable[[], Widget]) -> None:
+        """Mounts a plugin-supplied widget in place of Log/Macro output.
+
+        Used for panels whose whole UI is a custom live-updating widget
+        (e.g. a sensor dashboard) rather than the command/macro list.
+        """
+        await self.clear_custom()
+        widget = factory()
+        await self._custom_slot.mount(widget)
+        self.tabs.display = False
+        self.log_view.display = False
+        self.macro_view.display = False
+        self._custom_slot.display = True
+        widget.focus()
+
+    async def clear_custom(self) -> None:
+        """Unmounts the custom widget, if any -- Textual cancels its
+        timers automatically on removal, so nothing else needs cleanup."""
+        if self._custom_slot.display:
+            await self._custom_slot.remove_children()
+            self._custom_slot.display = False
 
     def on_key(self, event: events.Key) -> None:
         if not self._macro_available:

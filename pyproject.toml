@@ -8,6 +8,9 @@ dependencies = [
     "pyte>=0.8.0",
 ]
 
+[project.optional-dependencies]
+sensehat = ["sense-hat>=2.6.0"]
+
 [project.scripts]
 linuxdebugger = "linuxdebugger.app:run"
 
@@ -16,4 +19,4 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["linuxdebugger", "linuxdebugger.widgets"]
+packages = ["linuxdebugger", "linuxdebugger.widgets", "linuxdebugger.plugins"]
